@@ -1,0 +1,22 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: tenant-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ems_tenant
+    username: ${DB_USERNAME:ems_admin}
+    password: ${DB_PASSWORD:ems_local_pass}
+  jpa:
+    hibernate:
+      ddl-auto: validate   # Flyway owns the schema, Hibernate only checks it
+    open-in-view: false
+  flyway:
+    enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
