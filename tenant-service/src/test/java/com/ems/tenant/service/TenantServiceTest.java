@@ -16,11 +16,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import com.ems.tenant.event.TenantEvent;
+import org.springframework.context.ApplicationEventPublisher;
+import org.mockito.ArgumentCaptor;
 
 @ExtendWith(MockitoExtension.class)
 class TenantServiceTest {
 
     @Mock TenantRepository repository;
+    @Mock ApplicationEventPublisher eventPublisher;   // new
     @InjectMocks TenantService service;
 
     private CreateTenantRequest request(LocalDate start, LocalDate end) {
@@ -29,7 +33,7 @@ class TenantServiceTest {
     }
 
     @Test
-    void create_savesTenantAsActive() {
+    void create_savesTenantAsActive_andPublishesEvent() {
         when(repository.existsByCode("dps-meerut")).thenReturn(false);
         when(repository.save(any(Tenant.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -38,7 +42,11 @@ class TenantServiceTest {
 
         assertThat(res.code()).isEqualTo("dps-meerut");
         assertThat(res.status()).isEqualTo(TenantStatus.ACTIVE);
-        verify(repository).save(any(Tenant.class));
+
+        ArgumentCaptor<TenantEvent> captor = ArgumentCaptor.forClass(TenantEvent.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue().eventType()).isEqualTo(TenantEvent.CREATED);
+        assertThat(captor.getValue().code()).isEqualTo("dps-meerut");
     }
 
     @Test
@@ -49,6 +57,7 @@ class TenantServiceTest {
                 request(LocalDate.of(2026, 4, 1), LocalDate.of(2027, 3, 31))))
                 .isInstanceOf(DuplicateTenantException.class);
         verify(repository, never()).save(any());
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
