@@ -1,0 +1,38 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: user-service
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ems?currentSchema=users
+    username: ${DB_USERNAME:user_svc}
+    password: ${DB_PASSWORD:user_local_pass}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      "[hibernate.default_schema]": users
+  flyway:
+    enabled: true
+    schemas: users
+    default-schema: users
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: user-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        "[spring.deserializer.value.delegate.class]": org.springframework.kafka.support.serializer.JacksonJsonDeserializer
+        "[spring.json.value.default.type]": com.ems.user.event.TenantEvent
+        "[spring.json.trusted.packages]": com.ems.user.event
+        "[spring.json.use.type.headers]": false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
