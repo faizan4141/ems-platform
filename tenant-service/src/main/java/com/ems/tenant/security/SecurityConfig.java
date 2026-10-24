@@ -1,0 +1,34 @@
+package com.ems.tenant.security;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.http.HttpMethod;
+
+@Configuration
+@EnableMethodSecurity
+public class SecurityConfig {
+
+    @Bean
+    SecurityFilterChain apiSecurity(HttpSecurity http) throws Exception {
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(new KeycloakRoleConverter());
+
+        http
+                .csrf(AbstractHttpConfigurer::disable)   // stateless API with bearer tokens, no cookies
+                .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/actuator/health/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/tenants").hasRole("PLATFORM_ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/tenants").hasRole("PLATFORM_ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/tenants/*/status").hasRole("PLATFORM_ADMIN")
+                        .anyRequest().authenticated());
+
+        return http.build();
+    }
+}

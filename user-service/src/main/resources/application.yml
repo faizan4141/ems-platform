@@ -30,6 +30,11 @@ spring:
         "[spring.json.value.default.type]": com.ems.user.event.TenantEvent
         "[spring.json.trusted.packages]": com.ems.user.event
         "[spring.json.use.type.headers]": false
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/ems}
 
 management:
   endpoints:
