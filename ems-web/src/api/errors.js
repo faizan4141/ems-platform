@@ -12,6 +12,8 @@ export function friendlyMessage(status, detail) {
       return 'Too many requests. Please wait a few seconds and try again.';
     case 503:
       return 'The service is temporarily unavailable. Please try again shortly.';
+    case 502:
+      return detail || 'A connected service is not responding. Please try again shortly.';
     default:
       return status >= 500
         ? 'Something went wrong on our side. Please try again.'

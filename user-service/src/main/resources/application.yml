@@ -1,6 +1,16 @@
 server:
   port: 8082
 
+keycloak:
+  admin:
+    base-url: ${KEYCLOAK_BASE_URL:http://localhost:8180}
+    realm: ems
+    client-id: ems-user-service
+    client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET:}
+    invite-client-id: ems-web
+    invite-redirect-uri: ${APP_BASE_URL:http://localhost:5173}/
+    invite-lifespan-seconds: 259200   # invitation link valid for 3 days
+
 spring:
   application:
     name: user-service

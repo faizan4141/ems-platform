@@ -26,9 +26,23 @@ public class UserController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('TENANT_ADMIN')")
-    public UserResponse create(@AuthenticationPrincipal Jwt jwt,
-                               @Valid @RequestBody CreateUserRequest request) {
+    public CreateUserResponse create(@AuthenticationPrincipal Jwt jwt,
+                                     @Valid @RequestBody CreateUserRequest request) {
         return service.create(TenantClaims.requireTenantId(jwt), request);
+    }
+
+    @PostMapping("/tenant-admins")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public CreateUserResponse createTenantAdmin(@Valid @RequestBody CreateTenantAdminRequest request) {
+        return service.createTenantAdmin(request);
+    }
+
+    @PostMapping("/{userId}/invitation")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    public void resendInvitation(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID userId) {
+        service.resendInvitation(TenantClaims.requireTenantId(jwt), userId);
     }
 
     @GetMapping

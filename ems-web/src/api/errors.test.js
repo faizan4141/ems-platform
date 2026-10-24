@@ -21,4 +21,9 @@ describe('friendlyMessage', () => {
   it('falls back to a generic message for a 400 without detail', () => {
     expect(friendlyMessage(400)).toMatch(/could not be completed/i);
   });
+
+  it('explains a failing upstream service', () => {
+    expect(friendlyMessage(502)).toMatch(/try again/i);
+  });
+
 });

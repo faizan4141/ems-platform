@@ -38,3 +38,5 @@ th { color: var(--muted); font-weight: 600; font-size: .85rem; }
 .badge.suspended, .badge.expired, .badge.inactive { background: var(--warn-bg); color: var(--warn); }
 .center { text-align: center; margin-top: 20vh; }
 @media (max-width: 640px) { .topbar { flex-wrap: wrap; } .page { padding: 12px; } }
+.notice { margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: var(--ok-bg); color: var(--ok); }
+.notice.warn { background: var(--warn-bg); color: var(--warn); }

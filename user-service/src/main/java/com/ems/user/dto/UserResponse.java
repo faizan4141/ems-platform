@@ -6,10 +6,12 @@ import java.time.Instant;
 import java.util.UUID;
 
 public record UserResponse(UUID id, UUID tenantId, String email, String firstName,
-                           String lastName, Role role, UserStatus status, Instant createdAt) {
+                           String lastName, Role role, UserStatus status,
+                           boolean hasLogin, Instant createdAt) {
 
     public static UserResponse from(User u) {
         return new UserResponse(u.getId(), u.getTenantId(), u.getEmail(), u.getFirstName(),
-                u.getLastName(), u.getRole(), u.getStatus(), u.getCreatedAt());
+                u.getLastName(), u.getRole(), u.getStatus(), u.getKeycloakId() != null,
+                u.getCreatedAt());
     }
 }

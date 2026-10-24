@@ -9,6 +9,8 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler({TenantNotFoundException.class, UserNotFoundException.class})
     ProblemDetail handleNotFound(RuntimeException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
@@ -28,4 +30,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     ProblemDetail handleMissingTenant(MissingTenantClaimException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
     }
+
+    @ExceptionHandler(LoginAccountExistsException.class)
+    ProblemDetail handleLoginExists(LoginAccountExistsException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    @ExceptionHandler(IdentityProviderException.class)
+    ProblemDetail handleIdentityProvider(IdentityProviderException ex) {
+        // Details stay in the server log; the client gets a generic message.
+        log.error("Identity provider failure", ex);
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY,
+                "The login service is unavailable right now. Please try again shortly.");
+    }
+
 }

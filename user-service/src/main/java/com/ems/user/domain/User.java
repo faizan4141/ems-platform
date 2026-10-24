@@ -36,6 +36,9 @@ public class User {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    @Column(name = "keycloak_id")
+    private UUID keycloakId;
+
     @PrePersist
     void onCreate() {
         this.createdAt = Instant.now();
@@ -96,4 +99,13 @@ public class User {
     public Instant getCreatedAt() {
         return createdAt;
     }
+
+    public UUID getKeycloakId() {
+        return keycloakId;
+    }
+
+    public void setKeycloakId(UUID keycloakId) {
+        this.keycloakId = keycloakId;
+    }
+
 }
