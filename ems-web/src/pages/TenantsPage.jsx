@@ -85,7 +85,7 @@ export default function TenantsPage() {
                             {createTenant.isPending ? 'Saving…' : 'Create school'}
                         </button>
                     </div>
-                </form> ̰
+                </form>
                 <ErrorMessage error={createTenant.error} />
             </section>
 

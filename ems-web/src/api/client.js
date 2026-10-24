@@ -1,7 +1,9 @@
 import keycloak from '../keycloak';
 import { friendlyMessage } from './errors';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+import { config } from '../config';
+
+const BASE_URL = config.apiBaseUrl;
 
 export class ApiError extends Error {
   constructor(status, message, requestId) {

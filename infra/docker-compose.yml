@@ -1,3 +1,13 @@
+x-app-defaults: &app-defaults
+  profiles: ["apps"]
+  restart: unless-stopped
+  mem_limit: 640m
+
+# Tokens say iss=localhost:8180 (what the browser sees); containers fetch keys from keycloak:8080.
+x-jwt-env: &jwt-env
+  KEYCLOAK_ISSUER_URI: http://localhost:8180/realms/ems
+  SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/ems/protocol/openid-connect/certs
+
 services:
   postgres:
     image: postgres:16
@@ -82,6 +92,8 @@ services:
       KC_DB_USERNAME: keycloak_svc
       KC_DB_PASSWORD: keycloak_local_pass
       KC_DB_SCHEMA: keycloak
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
     ports:
       - "8180:8080"
   mailpit:
@@ -91,6 +103,95 @@ services:
     ports:
       - "8025:8025"   # web inbox
       - "1025:1025"   # SMTP
+  tenant-service:
+    <<: *app-defaults
+    build:
+      context: ../tenant-service
+    image: ems/tenant-service:local
+    container_name: ems-tenant-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      <<: *jwt-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?currentSchema=tenant
+      SPRING_DATA_REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  user-service:
+    <<: *app-defaults
+    build:
+      context: ../user-service
+    image: ems/user-service:local
+    container_name: ems-user-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      <<: *jwt-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?currentSchema=users
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      KEYCLOAK_BASE_URL: http://keycloak:8080
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      APP_BASE_URL: http://localhost:5173
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  api-gateway:
+    <<: *app-defaults
+    build:
+      context: ../api-gateway
+    image: ems/api-gateway:local
+    container_name: ems-api-gateway
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      <<: *jwt-env
+      SPRING_DATA_REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TENANT_SERVICE_URL: http://tenant-service:8081
+      USER_SERVICE_URL: http://user-service:8082
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  web:
+    <<: *app-defaults
+    build:
+      context: ../ems-web
+    image: ems/web:local
+    container_name: ems-web
+    mem_limit: 64m
+    ports:
+      - "5173:8080"
+    environment:
+      API_BASE_URL: http://localhost:8080
+      KEYCLOAK_URL: http://localhost:8180
+      KEYCLOAK_REALM: ems
+      KEYCLOAK_CLIENT_ID: ems-web
 
 volumes:
   postgres_data:

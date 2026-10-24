@@ -1,13 +1,12 @@
 server:
   port: 8081
-
-logging:
-  level:
-    org.springframework.security: DEBUG
+  shutdown: graceful
 
 spring:
   application:
     name: tenant-service
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
   datasource:
     url: jdbc:postgresql://localhost:5432/ems?currentSchema=tenant
     username: ${DB_USERNAME:tenant_svc}

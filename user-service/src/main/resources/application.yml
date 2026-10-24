@@ -1,5 +1,6 @@
 server:
   port: 8082
+  shutdown: graceful
 
 keycloak:
   admin:
@@ -14,6 +15,8 @@ keycloak:
 spring:
   application:
     name: user-service
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
   datasource:
     url: jdbc:postgresql://localhost:5432/ems?currentSchema=users
     username: ${DB_USERNAME:user_svc}

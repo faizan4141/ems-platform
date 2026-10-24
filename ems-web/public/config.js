@@ -1,0 +1,1 @@
+window.__EMS_CONFIG__ = {};
