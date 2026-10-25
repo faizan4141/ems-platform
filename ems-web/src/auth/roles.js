@@ -5,6 +5,6 @@ export function hasAnyRole(userRoles, wanted) {
 // Where a user lands after login, based on their role.
 export function homePathFor(userRoles) {
   if (userRoles.includes('PLATFORM_ADMIN')) return '/tenants';
-  if (hasAnyRole(userRoles, ['TENANT_ADMIN', 'TEACHER'])) return '/users';
+  if (hasAnyRole(userRoles, ['TENANT_ADMIN', 'TEACHER'])) return '/';
   return '/no-access';
 }

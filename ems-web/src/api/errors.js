@@ -1,5 +1,7 @@
 export function friendlyMessage(status, detail) {
   switch (status) {
+    case 0:
+      return 'Cannot reach the server. Check your connection and try again.';
     case 401:
       return 'Your session has expired. Please sign in again.';
     case 403:

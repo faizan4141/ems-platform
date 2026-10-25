@@ -26,4 +26,8 @@ describe('friendlyMessage', () => {
     expect(friendlyMessage(502)).toMatch(/try again/i);
   });
 
+  it('explains a network failure', () => {
+    expect(friendlyMessage(0)).toMatch(/cannot reach the server/i);
+  });
+
 });

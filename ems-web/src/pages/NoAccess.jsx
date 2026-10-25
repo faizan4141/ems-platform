@@ -1,11 +1,10 @@
+import { EmptyState } from '../components/ui';
+
 export default function NoAccess() {
   return (
     <section className="card">
-      <h1>Nothing here yet</h1>
-      <p>
-        Your account doesn't have access to any screens in this version of the portal.
-        Student and parent screens are coming later.
-      </p>
+      <EmptyState title="Nothing here yet"
+        text="Your account has no screens in this version. Student and parent views are coming later." />
     </section>
   );
 }
