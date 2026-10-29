@@ -154,6 +154,28 @@ services:
       retries: 10
       start_period: 60s
 
+  academic-service:
+    <<: *app-defaults
+    build:
+      context: ../academic-service
+    image: ems/academic-service:local
+    container_name: ems-academic-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      <<: *jwt-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?currentSchema=academic
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8083/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
   api-gateway:
     <<: *app-defaults
     build:
@@ -171,6 +193,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       TENANT_SERVICE_URL: http://tenant-service:8081
       USER_SERVICE_URL: http://user-service:8082
+      ACADEMIC_SERVICE_URL: http://academic-service:8083
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
       interval: 15s

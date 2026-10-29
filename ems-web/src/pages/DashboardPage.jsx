@@ -2,9 +2,12 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../features/auth/useAuth';
 import { useListUsersQuery } from '../services/usersApi';
 import { Chip, PageHeader } from '../components/ui';
+import { useGetOnboardingQuery } from '../services/academicApi';
 
 export default function DashboardPage() {
-  const { firstName } = useAuth();
+  const { firstName, roles } = useAuth();
+  const canManage = roles.includes('TENANT_ADMIN');
+  const { data: onboarding } = useGetOnboardingQuery(undefined, { skip: !canManage });
   const { data: users = [], isLoading } = useListUsersQuery();
   const count = (role) => users.filter((u) => u.role === role).length;
   const pendingLogins = users.filter((u) => !u.hasLogin).length;
@@ -19,9 +22,10 @@ export default function DashboardPage() {
   ];
 
   const steps = [
+    { label: 'Set up your school profile', done: onboarding?.profileDone, to: '/setup' },
+    { label: 'Add an academic year', done: onboarding?.academicYearDone, to: '/setup' },
+    { label: 'Create classes and sections', done: onboarding?.classesDone, to: '/setup' },
     { label: 'Invite your first teacher', done: count('TEACHER') > 0, to: '/users' },
-    { label: 'Set up school profile' },
-    { label: 'Add classes and academic year' },
     { label: 'Import students' },
   ];
 
@@ -41,19 +45,21 @@ export default function DashboardPage() {
       </div>
 
       <div className="two-col">
-        <section className="card">
-          <h2>Getting started</h2>
-          <ul className="checklist">
-            {steps.map((s) => (
-              <li key={s.label}>
-                <span>{s.label}</span>
-                {s.done ? <Chip tone="ok">Done</Chip>
-                  : s.to ? <Link className="btn-link" to={s.to}>Start</Link>
-                  : <Chip tone="neutral">Soon</Chip>}
-              </li>
-            ))}
-          </ul>
-        </section>
+        {canManage && (
+          <section className="card">
+            <h2>Getting started</h2>
+            <ul className="checklist">
+              {steps.map((s) => (
+                <li key={s.label}>
+                  <span>{s.label}</span>
+                  {s.done ? <Chip tone="ok">Done</Chip>
+                    : s.to ? <Link className="btn-link" to={s.to}>Start</Link>
+                    : <Chip tone="neutral">Soon</Chip>}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         <section className="card card-accent">
           <h2>The UniTent network</h2>
           <p className="muted">Share lesson plans, join inter-school events and be discovered by new families. Coming soon.</p>

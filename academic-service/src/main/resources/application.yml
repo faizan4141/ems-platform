@@ -1,0 +1,46 @@
+server:
+  port: 8083
+  shutdown: graceful
+
+spring:
+  application:
+    name: academic-service
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ems?currentSchema=academic
+    username: ${DB_USERNAME:academic_svc}
+    password: ${DB_PASSWORD:academic_local_pass}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      "[hibernate.default_schema]": academic
+  flyway:
+    enabled: true
+    schemas: academic
+    default-schema: academic
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/ems}
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: academic-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        "[spring.deserializer.value.delegate.class]": org.springframework.kafka.support.serializer.JacksonJsonDeserializer
+        "[spring.json.value.default.type]": com.ems.academic.event.TenantEvent
+        "[spring.json.trusted.packages]": com.ems.academic.event
+        "[spring.json.use.type.headers]": false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

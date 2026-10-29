@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { navFor } from './nav';
 import { initials, statusTone } from './format';
+import { parseSections } from './format';
 
 const labels = (roles) => navFor(roles).map((i) => i.label);
 
@@ -24,5 +25,13 @@ describe('format helpers', () => {
   it('maps statuses to tones', () => {
     expect(statusTone.ACTIVE).toBe('ok');
     expect(statusTone.SUSPENDED).toBe('bad');
+  });
+  it('splits a comma-separated list of sections', () => {
+    expect(parseSections('A, B ,, C')).toEqual(['A', 'B', 'C']);
+    expect(parseSections('')).toEqual([]);
+  });
+  it('shows tenant admins the School setup screen, but not teachers', () => {
+    expect(navFor(['TENANT_ADMIN']).map((i) => i.label)).toContain('School setup');
+    expect(navFor(['TEACHER']).map((i) => i.label)).not.toContain('School setup');
   });
 });

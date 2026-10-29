@@ -10,6 +10,7 @@ import DashboardPage from './pages/DashboardPage';
 import TenantsPage from './pages/TenantsPage';
 import UsersPage from './pages/UsersPage';
 import NoAccess from './pages/NoAccess';
+import SetupPage from './pages/SetupPage';
 
 function AuthGate({ children }) {
   const dispatch = useDispatch();
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="users" element={<RequireRole roles={['TENANT_ADMIN', 'TEACHER']}><UsersPage /></RequireRole>} />
           <Route path="no-access" element={<NoAccess />} />
           <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="setup" element={<RequireRole roles={['TENANT_ADMIN']}><SetupPage /></RequireRole>} />
         </Route>
       </Routes>
     </AuthGate>
