@@ -1,5 +1,6 @@
 package com.ems.tenant.security;
 
+import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -24,6 +25,7 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health/**").permitAll()
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/tenants").hasRole("PLATFORM_ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/v1/tenants").hasRole("PLATFORM_ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/tenants/*/status").hasRole("PLATFORM_ADMIN")

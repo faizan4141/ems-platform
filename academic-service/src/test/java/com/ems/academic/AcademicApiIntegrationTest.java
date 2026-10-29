@@ -111,6 +111,42 @@ class AcademicApiIntegrationTest {
         return text.split(java.util.regex.Pattern.quote(needle), -1).length - 1;
     }
 
+    private HttpResponse<String> upload(String path, String token, String csv) throws Exception {
+        String boundary = "----ems" + UUID.randomUUID();
+        String body = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"file\"; filename=\"students.csv\"\r\n"
+                + "Content-Type: text/csv\r\n\r\n" + csv + "\r\n--" + boundary + "--\r\n";
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(BodyPublishers.ofString(body)).build();
+        return CLIENT.send(request, BodyHandlers.ofString());
+    }
+
+    /** The n-th "id" value (0-based) in a JSON response. */
+    private static String nthId(String body, int n) {
+        Matcher m = ID.matcher(body);
+        for (int i = 0; i <= n; i++) {
+            assertThat(m.find()).as("id #" + n + " in: " + body).isTrue();
+        }
+        return m.group(1);
+    }
+
+    private static String studentJson(String admissionNo, String sectionId, String guardians) {
+        return "{\"admissionNo\":\"" + admissionNo + "\",\"firstName\":\"Aarav\",\"lastName\":\"Sharma\","
+                + "\"dateOfBirth\":\"2014-05-10\"" + (sectionId == null ? "" : ",\"sectionId\":\"" + sectionId + "\"")
+                + ",\"guardians\":" + guardians + "}";
+    }
+
+    private static final String ONE_GUARDIAN =
+            "[{\"name\":\"Raj Sharma\",\"relationship\":\"FATHER\",\"phone\":\"+91 98765 43210\"}]";
+
+    /** Creates a current year with "Class 8" and sections A and B; returns the id of section A. */
+    private String classWithSections(String token) throws Exception {
+        String yearId = idOf(send("POST", "/api/v1/academic-years", token, year("2026-27", "2026-04-01", "2027-03-31")).body());
+        String body = "{\"academicYearId\":\"" + yearId + "\",\"name\":\"Class 8\",\"gradeLevel\":8,\"sections\":[\"A\",\"B\"]}";
+        return nthId(send("POST", "/api/v1/classes", token, body).body(), 1);   // 0 = class id, 1 = first section id
+    }
+
     @Test
     void rejectsRequestsWithoutToken() throws Exception {
         assertThat(send("GET", "/api/v1/academic-years", null, null).statusCode()).isEqualTo(401);
@@ -203,5 +239,97 @@ class AcademicApiIntegrationTest {
                 .contains("\"configured\":true").contains("Springfield Public School");
         String onboarding = send("GET", "/api/v1/onboarding", token, null).body();
         assertThat(onboarding).contains("\"profileDone\":true").contains("\"academicYearDone\":false");
+    }
+
+    @Test
+    void createsAStudentWithGuardians_andFindsThemByFilterAndSearch() throws Exception {
+        String token = admin(tenantA);
+        String sectionA = classWithSections(token);
+
+        HttpResponse<String> created = send("POST", "/api/v1/students", token, studentJson("A-1", sectionA, ONE_GUARDIAN));
+        assertThat(created.statusCode()).isEqualTo(201);
+        assertThat(created.body()).contains("+919876543210").contains("\"primary\":true").contains("\"className\":\"Class 8\"");
+
+        send("POST", "/api/v1/students", token, studentJson("A-2", null, ONE_GUARDIAN));
+
+        assertThat(send("GET", "/api/v1/students?sectionId=" + sectionA, teacher(tenantA), null).body())
+                .contains("A-1").doesNotContain("A-2");
+        assertThat(send("GET", "/api/v1/students?unassigned=true", token, null).body())
+                .contains("A-2").doesNotContain("A-1");
+        assertThat(send("GET", "/api/v1/students?search=aarav%20sharma", token, null).body())
+                .contains("\"totalElements\":2");
+        assertThat(send("GET", "/api/v1/students?search=zzz", token, null).body()).contains("\"totalElements\":0");
+    }
+
+    @Test
+    void validatesStudentsAndGuardians() throws Exception {
+        String token = admin(tenantA);
+        assertThat(send("POST", "/api/v1/students", token, studentJson("A-1", null, ONE_GUARDIAN)).statusCode()).isEqualTo(201);
+        assertThat(send("POST", "/api/v1/students", token, studentJson("a-1", null, ONE_GUARDIAN)).statusCode())
+                .as("admission numbers are unique ignoring case").isEqualTo(409);
+        assertThat(send("POST", "/api/v1/students", token, studentJson("A-3", null, "[]")).statusCode()).isEqualTo(400);
+        assertThat(send("POST", "/api/v1/students", token, studentJson("A-4", null,
+                "[{\"name\":\"Raj\",\"relationship\":\"FATHER\",\"phone\":\"12\"}]")).statusCode()).isEqualTo(400);
+        assertThat(send("POST", "/api/v1/students", token, studentJson("A-5", null,
+                "[{\"name\":\"Raj\",\"relationship\":\"FATHER\",\"phone\":\"+919876543210\",\"primary\":true},"
+                        + "{\"name\":\"Sita\",\"relationship\":\"MOTHER\",\"phone\":\"+919876543211\",\"primary\":true}]"))
+                .statusCode()).isEqualTo(400);
+    }
+
+    @Test
+    void studentsAreIsolatedBetweenSchools_andOnlyAdminsCanWrite() throws Exception {
+        String studentId = idOf(send("POST", "/api/v1/students", admin(tenantA), studentJson("A-1", null, ONE_GUARDIAN)).body());
+
+        assertThat(send("GET", "/api/v1/students", admin(tenantB), null).body()).contains("\"totalElements\":0");
+        assertThat(send("GET", "/api/v1/students/" + studentId, admin(tenantB), null).statusCode()).isEqualTo(404);
+        assertThat(send("POST", "/api/v1/students", teacher(tenantA), studentJson("A-9", null, ONE_GUARDIAN)).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/students/" + studentId, teacher(tenantA), null).statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void movesAStudentAndReplacesGuardians() throws Exception {
+        String token = admin(tenantA);
+        String sectionA = classWithSections(token);
+        String studentId = idOf(send("POST", "/api/v1/students", token, studentJson("A-1", null, ONE_GUARDIAN)).body());
+
+        String update = "{\"firstName\":\"Aarav\",\"lastName\":\"Sharma\",\"dateOfBirth\":\"2014-05-10\","
+                + "\"sectionId\":\"" + sectionA + "\",\"status\":\"ACTIVE\"}";
+        assertThat(send("PUT", "/api/v1/students/" + studentId, token, update).body()).contains("\"sectionName\":\"A\"");
+
+        String replacement = "[{\"name\":\"Sita Sharma\",\"relationship\":\"MOTHER\",\"phone\":\"+919876500000\"}]";
+        HttpResponse<String> replaced = send("PUT", "/api/v1/students/" + studentId + "/guardians", token, replacement);
+        assertThat(replaced.statusCode()).isEqualTo(200);
+        assertThat(replaced.body()).contains("Sita Sharma").doesNotContain("Raj Sharma");
+    }
+
+    @Test
+    void csvImport_previewsFirst_thenImportsValidRowsOnly() throws Exception {
+        String token = admin(tenantA);
+        classWithSections(token);
+        String csv = "admission_no,first_name,last_name,date_of_birth,gender,class,section,guardian_name,guardian_relationship,guardian_phone,guardian_email\n"
+                + "S-1,Diya,Patel,2014-02-11,F,Class 8,A,Mohan Patel,FATHER,+919800000001,mohan@example.com\n"
+                + "S-2,Kabir,Singh,31/02/2014,M,Class 8,B,Anil Singh,FATHER,+919800000002,\n"
+                + "S-3,Meera,Nair,12/03/2014,F,Class 8,C,Latha Nair,MOTHER,+919800000003,\n"
+                + "S-1,Rohan,Gupta,2014-07-01,M,,,Vijay Gupta,FATHER,+919800000004,\n"
+                + "S-5,Sana,Khan,2014-09-09,F,,,Imran Khan,FATHER,+919800000005,\n";
+
+        HttpResponse<String> preview = upload("/api/v1/students/import?dryRun=true", token, csv);
+        assertThat(preview.statusCode()).isEqualTo(200);
+        assertThat(preview.body()).contains("\"totalRows\":5").contains("\"validRows\":2").contains("\"imported\":0");
+        assertThat(send("GET", "/api/v1/students", token, null).body()).contains("\"totalElements\":0");
+
+        HttpResponse<String> done = upload("/api/v1/students/import?dryRun=false", token, csv);
+        assertThat(done.body()).contains("\"imported\":2");
+        assertThat(send("GET", "/api/v1/students", token, null).body()).contains("\"totalElements\":2");
+
+        // importing the same file again must flag every previously imported admission number
+        assertThat(upload("/api/v1/students/import?dryRun=false", token, csv).body()).contains("\"imported\":0");
+    }
+
+    @Test
+    void csvImport_rejectsFilesWithMissingColumns_andNonAdmins() throws Exception {
+        assertThat(upload("/api/v1/students/import", admin(tenantA), "admission_no,first_name\nS-1,Diya\n").statusCode())
+                .isEqualTo(400);
+        assertThat(upload("/api/v1/students/import", teacher(tenantA), "a,b\n").statusCode()).isEqualTo(403);
     }
 }

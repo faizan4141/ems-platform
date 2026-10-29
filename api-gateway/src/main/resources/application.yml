@@ -43,7 +43,7 @@ spring:
             - id: academic-service
               uri: ${ACADEMIC_SERVICE_URL:http://localhost:8083}
               predicates:
-                - Path=/api/v1/school/**,/api/v1/academic-years/**,/api/v1/classes/**,/api/v1/onboarding/**
+                - Path=/api/v1/school/**,/api/v1/academic-years/**,/api/v1/classes/**,/api/v1/onboarding/**,/api/v1/students/**
 
 ems:
   cors:

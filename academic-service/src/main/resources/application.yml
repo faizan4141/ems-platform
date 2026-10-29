@@ -38,6 +38,10 @@ spring:
         "[spring.json.value.default.type]": com.ems.academic.event.TenantEvent
         "[spring.json.trusted.packages]": com.ems.academic.event
         "[spring.json.use.type.headers]": false
+  servlet:
+    multipart:
+      max-file-size: 1MB
+      max-request-size: 1MB
 
 management:
   endpoints:

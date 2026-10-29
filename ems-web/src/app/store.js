@@ -5,5 +5,6 @@ import { api } from '../services/api';
 
 export const store = configureStore({
   reducer: { auth: authReducer, ui: uiReducer, [api.reducerPath]: api.reducer },
-  middleware: (getDefault) => getDefault().concat(api.middleware),
+  middleware: (getDefault) =>
+    getDefault({ serializableCheck: { ignoredPaths: [/^api\.mutations/] } }).concat(api.middleware),
 });

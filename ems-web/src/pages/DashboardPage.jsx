@@ -3,11 +3,13 @@ import { useAuth } from '../features/auth/useAuth';
 import { useListUsersQuery } from '../services/usersApi';
 import { Chip, PageHeader } from '../components/ui';
 import { useGetOnboardingQuery } from '../services/academicApi';
+import { useListStudentsQuery } from '../services/studentsApi';
 
 export default function DashboardPage() {
   const { firstName, roles } = useAuth();
   const canManage = roles.includes('TENANT_ADMIN');
   const { data: onboarding } = useGetOnboardingQuery(undefined, { skip: !canManage });
+  const { data: studentPage } = useListStudentsQuery({ size: 1 });
   const { data: users = [], isLoading } = useListUsersQuery();
   const count = (role) => users.filter((u) => u.role === role).length;
   const pendingLogins = users.filter((u) => !u.hasLogin).length;
@@ -16,7 +18,7 @@ export default function DashboardPage() {
   const kpis = [
     { label: 'People', value: show(users.length), chip: <Chip tone="info">In your school</Chip> },
     { label: 'Teachers', value: show(count('TEACHER')), chip: <Chip tone="ok">Staff</Chip> },
-    { label: 'Students', value: show(count('STUDENT')), chip: <Chip tone="info">Enrolled</Chip> },
+    { label: 'Students', value: studentPage ? studentPage.totalElements : '…', chip: <Chip tone="info">Enrolled</Chip> },
     { label: 'Logins to set up', value: show(pendingLogins),
       chip: <Chip tone={pendingLogins > 0 ? 'warn' : 'ok'}>{pendingLogins > 0 ? 'Needs attention' : 'All set'}</Chip> },
   ];
@@ -26,7 +28,7 @@ export default function DashboardPage() {
     { label: 'Add an academic year', done: onboarding?.academicYearDone, to: '/setup' },
     { label: 'Create classes and sections', done: onboarding?.classesDone, to: '/setup' },
     { label: 'Invite your first teacher', done: count('TEACHER') > 0, to: '/users' },
-    { label: 'Import students' },
+    { label: 'Add your students', done: onboarding?.studentsDone, to: '/students' },
   ];
 
   return (
