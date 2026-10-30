@@ -15,6 +15,8 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import com.ems.academic.event.AttendanceRecorded;
+import org.springframework.context.event.EventListener;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -28,12 +30,15 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "spring.kafka.listener.auto-startup=false")
+        properties = {"spring.kafka.listener.auto-startup=false", "ems.kafka.publish=false"})
 class AcademicApiIntegrationTest {
 
     @Container
@@ -43,10 +48,20 @@ class AcademicApiIntegrationTest {
 
     @TestConfiguration
     static class TestJwtConfig {
+        static class EventCollector {
+            final List<AttendanceRecorded> events = new CopyOnWriteArrayList<>();
+
+            @EventListener
+            void on(AttendanceRecorded event) { events.add(event); }
+        }
+
         @Bean
         JwtDecoder jwtDecoder() {
             return AcademicApiIntegrationTest::decode;
         }
+
+        @Bean
+        EventCollector eventCollector() { return new EventCollector(); }
     }
 
     /** Test tokens look like "ROLE" or "ROLE.tenantId" (bearer tokens may only use letters, digits and -._~+/). */
@@ -66,6 +81,8 @@ class AcademicApiIntegrationTest {
 
     @Value("${local.server.port}") int port;
     @Autowired TenantSnapshotRepository snapshots;
+    @Autowired TestJwtConfig.EventCollector collector;
+    @Autowired Clock clock;
 
     private final UUID tenantA = UUID.randomUUID();
     private final UUID tenantB = UUID.randomUUID();
@@ -145,6 +162,21 @@ class AcademicApiIntegrationTest {
         String yearId = idOf(send("POST", "/api/v1/academic-years", token, year("2026-27", "2026-04-01", "2027-03-31")).body());
         String body = "{\"academicYearId\":\"" + yearId + "\",\"name\":\"Class 8\",\"gradeLevel\":8,\"sections\":[\"A\",\"B\"]}";
         return nthId(send("POST", "/api/v1/classes", token, body).body(), 1);   // 0 = class id, 1 = first section id
+    }
+
+    private String studentInSection(String token, String admissionNo, String sectionId) throws Exception {
+        return idOf(send("POST", "/api/v1/students", token, studentJson(admissionNo, sectionId, ONE_GUARDIAN)).body());
+    }
+
+    /** marks(id1, "ABSENT", id2, "LATE"): students not listed are present. */
+    private static String marks(String... idAndStatus) {
+        StringBuilder sb = new StringBuilder("{\"marks\":[");
+        for (int i = 0; i < idAndStatus.length; i += 2) {
+            if (i > 0) sb.append(',');
+            sb.append("{\"studentId\":\"").append(idAndStatus[i]).append("\",\"status\":\"")
+                    .append(idAndStatus[i + 1]).append("\"}");
+        }
+        return sb.append("]}").toString();
     }
 
     @Test
@@ -331,5 +363,68 @@ class AcademicApiIntegrationTest {
         assertThat(upload("/api/v1/students/import", admin(tenantA), "admission_no,first_name\nS-1,Diya\n").statusCode())
                 .isEqualTo(400);
         assertThat(upload("/api/v1/students/import", teacher(tenantA), "a,b\n").statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void takesAttendance_notifiesOnlyOnChanges_andShowsItInTheRoster() throws Exception {
+        String token = admin(tenantA);
+        String section = classWithSections(token);
+        String aarav = studentInSection(token, "A-1", section);
+        studentInSection(token, "A-2", section);
+        String path = "/api/v1/attendance/sections/" + section;
+
+        String before = send("GET", path, teacher(tenantA), null).body();
+        assertThat(before).contains("\"taken\":false").contains("\"status\":\"PRESENT\"");
+
+        int eventsBefore = collector.events.size();
+        HttpResponse<String> saved = send("PUT", path, teacher(tenantA), marks(aarav, "ABSENT"));
+        assertThat(saved.statusCode()).isEqualTo(200);
+        assertThat(saved.body()).contains("\"absent\":1").contains("\"present\":1").contains("\"notified\":1");
+        AttendanceRecorded event = collector.events.get(eventsBefore);
+        assertThat(event.alerts()).singleElement().satisfies(a -> {
+            assertThat(a.guardianPhone()).isEqualTo("+919876543210");
+            assertThat(a.status().name()).isEqualTo("ABSENT");
+        });
+
+        assertThat(send("PUT", path, teacher(tenantA), marks(aarav, "ABSENT")).body())
+                .as("saving the same marks again sends nothing").contains("\"notified\":0");
+        assertThat(send("PUT", path, teacher(tenantA), marks(aarav, "LATE")).body())
+                .contains("\"notified\":1").contains("\"late\":1");
+        assertThat(send("PUT", path, teacher(tenantA), marks()).body())
+                .as("a correction back to present sends nothing").contains("\"notified\":0").contains("\"present\":2");
+        assertThat(send("GET", path, teacher(tenantA), null).body()).contains("\"taken\":true");
+    }
+
+    @Test
+    void teachersCanOnlyEditToday_adminsCanCorrectThePast_futureIsRejected() throws Exception {
+        String token = admin(tenantA);
+        String section = classWithSections(token);
+        String student = studentInSection(token, "A-1", section);
+        String path = "/api/v1/attendance/sections/" + section;
+        LocalDate today = LocalDate.now(clock);
+
+        assertThat(send("PUT", path + "?date=" + today.minusDays(1), teacher(tenantA), marks(student, "ABSENT")).statusCode())
+                .isEqualTo(403);
+        assertThat(send("PUT", path + "?date=" + today.minusDays(1), token, marks(student, "ABSENT")).statusCode())
+                .isEqualTo(200);
+        assertThat(send("PUT", path + "?date=" + today.plusDays(1), token, marks()).statusCode()).isEqualTo(400);
+    }
+
+    @Test
+    void rejectsForeignStudents_keepsSchoolsApart_andSummarizesTheDay() throws Exception {
+        String token = admin(tenantA);
+        String section = classWithSections(token);
+        String student = studentInSection(token, "A-1", section);
+        studentInSection(token, "A-2", section);
+        String path = "/api/v1/attendance/sections/" + section;
+
+        assertThat(send("PUT", path, token, marks(UUID.randomUUID().toString(), "ABSENT")).statusCode()).isEqualTo(400);
+        assertThat(send("GET", path, admin(tenantB), null).statusCode()).isEqualTo(404);
+
+        send("PUT", path, token, marks(student, "ABSENT"));
+        String summary = send("GET", "/api/v1/attendance/summary", token, null).body();
+        assertThat(summary).contains("\"sectionsTaken\":1").contains("\"absent\":1").contains("\"percentPresent\":50");
+        assertThat(send("GET", "/api/v1/attendance/summary", admin(tenantB), null).body())
+                .contains("\"sectionsTaken\":0");
     }
 }

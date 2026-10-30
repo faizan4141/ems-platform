@@ -26,6 +26,7 @@ public class SecurityConfig {
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.PUT, "/api/v1/school/profile", "/api/v1/academic-years/*/current",
                                 "/api/v1/students/*", "/api/v1/students/*/guardians").hasRole("TENANT_ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/attendance/sections/*").hasAnyRole("TENANT_ADMIN", "TEACHER")
                         .requestMatchers(HttpMethod.POST, "/api/v1/academic-years", "/api/v1/classes",
                                 "/api/v1/classes/*/sections", "/api/v1/students", "/api/v1/students/import")
                         .hasRole("TENANT_ADMIN")

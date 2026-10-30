@@ -4,6 +4,7 @@ import { useListUsersQuery } from '../services/usersApi';
 import { Chip, PageHeader } from '../components/ui';
 import { useGetOnboardingQuery } from '../services/academicApi';
 import { useListStudentsQuery } from '../services/studentsApi';
+import { useGetAttendanceSummaryQuery } from '../services/attendanceApi';
 
 export default function DashboardPage() {
   const { firstName, roles } = useAuth();
@@ -11,11 +12,19 @@ export default function DashboardPage() {
   const { data: onboarding } = useGetOnboardingQuery(undefined, { skip: !canManage });
   const { data: studentPage } = useListStudentsQuery({ size: 1 });
   const { data: users = [], isLoading } = useListUsersQuery();
+  const { data: attendance } = useGetAttendanceSummaryQuery();
   const count = (role) => users.filter((u) => u.role === role).length;
   const pendingLogins = users.filter((u) => !u.hasLogin).length;
   const show = (n) => (isLoading ? '…' : n);
 
   const kpis = [
+    {
+      label: 'Attendance today',
+      value: !attendance ? '…' : attendance.percentPresent == null ? '—' : `${attendance.percentPresent}%`,
+      chip: <Chip tone={attendance && attendance.sectionsTaken >= attendance.sectionsTotal && attendance.sectionsTotal > 0 ? 'ok' : 'warn'}>
+        {attendance ? `${attendance.sectionsTaken} of ${attendance.sectionsTotal} classes done` : '…'}
+      </Chip>,
+    },
     { label: 'People', value: show(users.length), chip: <Chip tone="info">In your school</Chip> },
     { label: 'Teachers', value: show(count('TEACHER')), chip: <Chip tone="ok">Staff</Chip> },
     { label: 'Students', value: studentPage ? studentPage.totalElements : '…', chip: <Chip tone="info">Enrolled</Chip> },

@@ -13,6 +13,7 @@ import NoAccess from './pages/NoAccess';
 import SetupPage from './pages/SetupPage';
 import StudentsPage from './pages/StudentsPage';
 import StudentDetailPage from './pages/StudentDetailPage';
+import AttendancePage from './pages/AttendancePage';
 
 function AuthGate({ children }) {
   const dispatch = useDispatch();
@@ -50,6 +51,7 @@ export default function App() {
           <Route path="setup" element={<RequireRole roles={['TENANT_ADMIN']}><SetupPage /></RequireRole>} />
           <Route path="students" element={<RequireRole roles={['TENANT_ADMIN', 'TEACHER']}><StudentsPage /></RequireRole>} />
           <Route path="students/:id" element={<RequireRole roles={['TENANT_ADMIN', 'TEACHER']}><StudentDetailPage /></RequireRole>} />
+          <Route path="attendance" element={<RequireRole roles={['TENANT_ADMIN', 'TEACHER']}><AttendancePage /></RequireRole>} />
         </Route>
       </Routes>
     </AuthGate>

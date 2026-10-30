@@ -1,0 +1,50 @@
+server:
+  port: 8084
+  shutdown: graceful
+
+spring:
+  application:
+    name: notification-service
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ems?currentSchema=notification
+    username: ${DB_USERNAME:notification_svc}
+    password: ${DB_PASSWORD:notification_local_pass}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      "[hibernate.default_schema]": notification
+  flyway:
+    enabled: true
+    schemas: notification
+    default-schema: notification
+  mail:
+    host: localhost
+    port: 1025
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: notification-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        "[spring.deserializer.value.delegate.class]": org.springframework.kafka.support.serializer.JacksonJsonDeserializer
+        "[spring.json.value.default.type]": com.ems.notification.event.AttendanceAlertEvent
+        "[spring.json.trusted.packages]": com.ems.notification.event
+        "[spring.json.use.type.headers]": false
+
+notifications:
+  from: no-reply@unitent.local
+  brand: UniTent
+  dispatch:
+    interval-ms: 5000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

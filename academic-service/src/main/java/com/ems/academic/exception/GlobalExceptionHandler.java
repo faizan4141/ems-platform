@@ -15,7 +15,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
     }
 
-    @ExceptionHandler({TenantNotActiveException.class, MissingTenantClaimException.class})
+    @ExceptionHandler({TenantNotActiveException.class, MissingTenantClaimException.class, OperationNotAllowedException.class})
     ProblemDetail forbidden(RuntimeException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage());
     }

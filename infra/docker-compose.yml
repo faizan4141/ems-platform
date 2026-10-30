@@ -201,6 +201,30 @@ services:
       retries: 10
       start_period: 60s
 
+  notification-service:
+    <<: *app-defaults
+    build:
+      context: ../notification-service
+    image: ems/notification-service:local
+    container_name: ems-notification-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      mailpit:
+        condition: service_started
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?currentSchema=notification
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      SPRING_MAIL_HOST: mailpit
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8084/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
   web:
     <<: *app-defaults
     build:

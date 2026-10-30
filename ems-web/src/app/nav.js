@@ -8,7 +8,7 @@ export const NAV = [
   { to: '/students', label: 'Students', icon: GraduationCap, roles: TENANT },
   { to: '/users', label: 'People', icon: Users, roles: TENANT },
   { to: '/setup', label: 'School setup', icon: Settings, roles: ['TENANT_ADMIN'] },
-  { label: 'Attendance', icon: ClipboardCheck, roles: TENANT, soon: true },
+  { to: '/attendance', label: 'Attendance', icon: ClipboardCheck, roles: TENANT },
   { label: 'Fees', icon: Wallet, roles: ['TENANT_ADMIN'], soon: true },
   { label: 'Network hub', icon: Share2, roles: TENANT, soon: true },
 ];

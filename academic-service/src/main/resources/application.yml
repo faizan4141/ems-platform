@@ -38,10 +38,19 @@ spring:
         "[spring.json.value.default.type]": com.ems.academic.event.TenantEvent
         "[spring.json.trusted.packages]": com.ems.academic.event
         "[spring.json.use.type.headers]": false
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JacksonJsonSerializer
+      properties:
+        "[spring.json.add.type.headers]": false
   servlet:
     multipart:
       max-file-size: 1MB
       max-request-size: 1MB
+      
+ems:
+  timezone: Asia/Kolkata
 
 management:
   endpoints:

@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -17,4 +18,6 @@ public interface GuardianRepository extends JpaRepository<Guardian, UUID> {
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("delete from Guardian g where g.studentId = :studentId")
     int deleteAllForStudent(@Param("studentId") UUID studentId);
+
+    List<Guardian> findByStudentIdIn(Collection<UUID> studentIds);
 }
