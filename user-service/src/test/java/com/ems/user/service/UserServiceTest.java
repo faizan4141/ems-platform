@@ -12,6 +12,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import com.ems.user.event.UserLoginEvent;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -31,6 +33,8 @@ class UserServiceTest {
     TenantSnapshotRepository tenants;
     @Mock
     IdentityProvisioner identity;
+    @Mock
+    ApplicationEventPublisher events;
     @InjectMocks
     UserService service;
 
@@ -174,5 +178,31 @@ class UserServiceTest {
         verify(identity).createUser(captor.capture());
         assertThat(captor.getValue().tenantId()).isEqualTo(tenantId);
         assertThat(captor.getValue().realmRole()).isEqualTo("TENANT_ADMIN");
+    }
+
+    @Test
+    void creatingAParentAnnouncesTheNewLogin() {
+        activeTenant();
+        freshEmail("raj@example.com");
+        when(identity.createUser(any(NewLogin.class))).thenReturn(keycloakId);
+
+        service.create(tenantId, new CreateUserRequest("raj@example.com", "Raj", "Sharma", Role.PARENT));
+
+        ArgumentCaptor<UserLoginEvent> captor = ArgumentCaptor.forClass(UserLoginEvent.class);
+        verify(events).publishEvent(captor.capture());
+        assertThat(captor.getValue().tenantId()).isEqualTo(tenantId);
+        assertThat(captor.getValue().keycloakId()).isEqualTo(keycloakId);
+        assertThat(captor.getValue().email()).isEqualTo("raj@example.com");
+    }
+
+    @Test
+    void creatingAnyOtherRoleAnnouncesNothing() {
+        activeTenant();
+        freshEmail("teacher@school.com");
+        when(identity.createUser(any(NewLogin.class))).thenReturn(keycloakId);
+
+        service.create(tenantId, request);
+
+        verifyNoInteractions(events);
     }
 }

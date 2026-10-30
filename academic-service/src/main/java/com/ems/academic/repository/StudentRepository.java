@@ -26,4 +26,12 @@ public interface StudentRepository extends JpaRepository<Student, UUID>, JpaSpec
     @Query("select count(distinct s.sectionId) from Student s where s.tenantId = :tenantId "
             + "and s.sectionId is not null and s.status = com.ems.academic.domain.StudentStatus.ACTIVE")
     long countSectionsWithStudents(@Param("tenantId") UUID tenantId);
+
+    /** The active children of the guardian whose login is the given Keycloak user. */
+    @Query("select distinct s from Student s, Guardian g, GuardianLogin l "
+            + "where l.keycloakId = :keycloakId and l.tenantId = :tenantId and s.tenantId = :tenantId "
+            + "and g.studentId = s.id and g.email is not null and lower(g.email) = l.emailLower "
+            + "and s.status = com.ems.academic.domain.StudentStatus.ACTIVE "
+            + "order by s.firstName, s.lastName")
+    List<Student> findChildren(@Param("keycloakId") UUID keycloakId, @Param("tenantId") UUID tenantId);
 }

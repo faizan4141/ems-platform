@@ -3,11 +3,13 @@ import { Link, useParams } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { pushToast } from '../features/ui/uiSlice';
 import { useAuth } from '../features/auth/useAuth';
-import { fullName, placementLabel } from '../app/students';
+import { fullName, placementLabel, splitName } from '../app/students';
 import { statusTone } from '../app/format';
 import { useListClassesQuery } from '../services/academicApi';
 import { useGetStudentQuery, useUpdateStudentMutation } from '../services/studentsApi';
 import { Chip, ErrorNotice, Field, PageHeader } from '../components/ui';
+import { api } from '../services/api';
+import { useCreateUserMutation } from '../services/usersApi';
 
 function Placement({ student }) {
   const dispatch = useDispatch();
@@ -55,6 +57,20 @@ export default function StudentDetailPage() {
   const { id } = useParams();
   const canManage = useAuth().roles.includes('TENANT_ADMIN');
   const { data: student, isLoading, error } = useGetStudentQuery(id);
+  const dispatch = useDispatch();
+  const [createUser, { isLoading: inviting }] = useCreateUserMutation();
+
+  const invite = async (guardian) => {
+    const { first, last } = splitName(guardian.name);
+    try {
+      await createUser({ email: guardian.email, firstName: first, lastName: last, role: 'PARENT' }).unwrap();
+      dispatch(pushToast({ text: `Invitation sent to ${guardian.email}` }));
+      // the "Portal access" badge appears once the login event has been processed
+      setTimeout(() => dispatch(api.util.invalidateTags(['Student'])), 2500);
+    } catch (err) {
+      dispatch(pushToast({ tone: 'error', text: err.message }));
+    }
+  };
 
   if (isLoading) return <div className="skeleton" style={{ width: '40%' }} />;
   if (error) return <><Link to="/students" className="btn-link">← Students</Link><ErrorNotice error={error} /></>;
@@ -85,7 +101,12 @@ export default function StudentDetailPage() {
                 <strong>{g.name}</strong> <span className="muted">· {g.relationship}</span><br />
                 <span className="muted">{g.phone}{g.email ? ` · ${g.email}` : ''}</span>
               </span>
-              {g.primary && <Chip tone="info">Primary contact</Chip>}
+              <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {g.primary && <Chip tone="info">Primary contact</Chip>}
+                {g.portalAccess ? <Chip tone="ok">Portal access</Chip>
+                  : !g.email ? <span className="muted">No email on file</span>
+                  : canManage && <button className="btn btn-secondary" disabled={inviting} onClick={() => invite(g)}>Invite to parent portal</button>}
+              </span>
             </li>
           ))}
         </ul>

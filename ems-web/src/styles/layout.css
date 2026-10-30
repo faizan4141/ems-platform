@@ -67,3 +67,10 @@ a.nav-item:hover { background: var(--bg); color: var(--text); }
 .roster-row .name strong { display: block; }
 .summary-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
 .summary-chips .spacer { flex: 1; }
+.today-hero { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.today-hero .chip { font-size: 18px; padding: 6px 16px; }
+.notice { padding: 14px 0; border-bottom: 1px solid var(--border); }
+.notice:last-child { border-bottom: 0; }
+.notice h3 { margin: 0 0 4px; font-size: 1rem; }
+.notice p { margin: 6px 0 0; white-space: pre-wrap; }
+.notice-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }

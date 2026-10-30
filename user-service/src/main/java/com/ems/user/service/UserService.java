@@ -13,6 +13,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import com.ems.user.event.UserLoginEvent;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.List;
 import java.util.UUID;
@@ -25,12 +27,14 @@ public class UserService {
     private final UserRepository users;
     private final TenantSnapshotRepository tenants;
     private final IdentityProvisioner identity;
+    private final ApplicationEventPublisher events;
 
     public UserService(UserRepository users, TenantSnapshotRepository tenants,
-                       IdentityProvisioner identity) {
+                       IdentityProvisioner identity, ApplicationEventPublisher events) {
         this.users = users;
         this.tenants = tenants;
         this.identity = identity;
+        this.events = events;
     }
 
     @Transactional
@@ -52,6 +56,7 @@ public class UserService {
         u = users.saveAndFlush(u);
 
         provisionLogin(u);
+        announceParentLogin(u);
         boolean invitationSent = trySendInvitation(u);
         return new CreateUserResponse(UserResponse.from(u), invitationSent);
     }
@@ -73,6 +78,7 @@ public class UserService {
         if (u.getKeycloakId() == null) {
             provisionLogin(u);   // users created before Step 9 get their login now
         }
+        announceParentLogin(u);
         identity.sendSetPasswordEmail(u.getKeycloakId());
     }
 
@@ -136,5 +142,12 @@ public class UserService {
                 }
             }
         });
+    }
+
+    /** Tells other services that a parent login exists, so children can be linked to it. */
+    private void announceParentLogin(User u) {
+        if (u.getRole() == Role.PARENT && u.getKeycloakId() != null) {
+            events.publishEvent(UserLoginEvent.parentLogin(u));
+        }
     }
 }

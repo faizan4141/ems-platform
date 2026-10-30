@@ -17,6 +17,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import com.ems.academic.event.AttendanceRecorded;
 import org.springframework.context.event.EventListener;
+import com.ems.academic.domain.GuardianLogin;
+import com.ems.academic.repository.GuardianLoginRepository;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -64,10 +66,11 @@ class AcademicApiIntegrationTest {
         EventCollector eventCollector() { return new EventCollector(); }
     }
 
-    /** Test tokens look like "ROLE" or "ROLE.tenantId" (bearer tokens may only use letters, digits and -._~+/). */
+    /** Test tokens look like "ROLE", "ROLE.tenantId" or "ROLE.tenantId.subject". */
     private static Jwt decode(String token) {
         String[] parts = token.split("\\.");
-        Jwt.Builder builder = Jwt.withTokenValue(token).header("alg", "none").subject("user-" + parts[0])
+        String subject = parts.length > 2 ? parts[2] : "user-" + parts[0];
+        Jwt.Builder builder = Jwt.withTokenValue(token).header("alg", "none").subject(subject)
                 .claim("realm_access", Map.of("roles", List.of(parts[0])))
                 .issuedAt(Instant.now()).expiresAt(Instant.now().plusSeconds(600));
         if (parts.length > 1) {
@@ -83,6 +86,7 @@ class AcademicApiIntegrationTest {
     @Autowired TenantSnapshotRepository snapshots;
     @Autowired TestJwtConfig.EventCollector collector;
     @Autowired Clock clock;
+    @Autowired GuardianLoginRepository logins;
 
     private final UUID tenantA = UUID.randomUUID();
     private final UUID tenantB = UUID.randomUUID();
@@ -177,6 +181,16 @@ class AcademicApiIntegrationTest {
                     .append(idAndStatus[i + 1]).append("\"}");
         }
         return sb.append("]}").toString();
+    }
+
+    private String parent(UUID tenant, UUID subject) { return "PARENT." + tenant + "." + subject; }
+
+    private static String guardianWithEmail(String email) {
+        return "[{\"name\":\"Raj Sharma\",\"relationship\":\"FATHER\",\"phone\":\"+919876543210\",\"email\":\"" + email + "\"}]";
+    }
+
+    private static String notice(String title, String audience) {
+        return "{\"title\":\"" + title + "\",\"body\":\"Details\",\"audience\":\"" + audience + "\"}";
     }
 
     @Test
@@ -426,5 +440,72 @@ class AcademicApiIntegrationTest {
         assertThat(summary).contains("\"sectionsTaken\":1").contains("\"absent\":1").contains("\"percentPresent\":50");
         assertThat(send("GET", "/api/v1/attendance/summary", admin(tenantB), null).body())
                 .contains("\"sectionsTaken\":0");
+    }
+
+    @Test
+    void parentsSeeOnlyTheirOwnChildren() throws Exception {
+        String token = admin(tenantA);
+        String section = classWithSections(token);
+        String mine = idOf(send("POST", "/api/v1/students", token,
+                studentJson("P-1", section, guardianWithEmail("raj@example.com"))).body());
+        String other = idOf(send("POST", "/api/v1/students", token,
+                studentJson("P-2", section, guardianWithEmail("someone@example.com"))).body());
+        UUID parentSub = UUID.randomUUID();
+        logins.save(new GuardianLogin(parentSub, tenantA, "Raj@Example.com"));   // matching ignores case
+
+        send("PUT", "/api/v1/attendance/sections/" + section, teacher(tenantA), marks(mine, "ABSENT"));
+
+        String children = send("GET", "/api/v1/parent/children", parent(tenantA, parentSub), null).body();
+        assertThat(children).contains(mine).doesNotContain(other);
+        assertThat(send("GET", "/api/v1/parent/children/" + mine + "/today", parent(tenantA, parentSub), null).body())
+                .contains("\"today\":\"ABSENT\"");
+        assertThat(send("GET", "/api/v1/parent/children/" + other + "/today", parent(tenantA, parentSub), null).statusCode())
+                .isEqualTo(404);
+        assertThat(send("GET", "/api/v1/parent/children", parent(tenantB, parentSub), null).body()).isEqualTo("[]");
+    }
+
+    @Test
+    void parentsAreLockedOutOfSchoolData_andStaffOutOfParentData() throws Exception {
+        UUID sub = UUID.randomUUID();
+        assertThat(send("GET", "/api/v1/students", parent(tenantA, sub), null).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/school/profile", parent(tenantA, sub), null).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/parent/children", teacher(tenantA), null).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/parent/children", admin(tenantA), null).statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void guardiansShowWhetherTheyHavePortalAccess() throws Exception {
+        String token = admin(tenantA);
+        String linked = idOf(send("POST", "/api/v1/students", token,
+                studentJson("L-1", null, guardianWithEmail("raj@example.com"))).body());
+        String unlinked = idOf(send("POST", "/api/v1/students", token,
+                studentJson("L-2", null, guardianWithEmail("other@example.com"))).body());
+        logins.save(new GuardianLogin(UUID.randomUUID(), tenantA, "raj@example.com"));
+
+        assertThat(send("GET", "/api/v1/students/" + linked, token, null).body()).contains("\"portalAccess\":true");
+        assertThat(send("GET", "/api/v1/students/" + unlinked, token, null).body()).contains("\"portalAccess\":false");
+    }
+
+    @Test
+    void noticesAreFilteredByAudience_andOnlyAdminsPublish() throws Exception {
+        String token = admin(tenantA);
+        UUID sub = UUID.randomUUID();
+
+        assertThat(send("POST", "/api/v1/notices", token, notice("Sports day", "PARENTS")).statusCode()).isEqualTo(201);
+        String staffNotice = idOf(send("POST", "/api/v1/notices", token, notice("Staff meeting", "STAFF")).body());
+        assertThat(send("POST", "/api/v1/notices", token, "{\"title\":\"\",\"body\":\"x\",\"audience\":\"ALL\"}").statusCode())
+                .isEqualTo(400);
+
+        String parentView = send("GET", "/api/v1/notices", parent(tenantA, sub), null).body();
+        assertThat(parentView).contains("Sports day").doesNotContain("Staff meeting");
+        assertThat(send("GET", "/api/v1/notices", teacher(tenantA), null).body())
+                .contains("Sports day").contains("Staff meeting");
+
+        assertThat(send("POST", "/api/v1/notices", teacher(tenantA), notice("Nope", "ALL")).statusCode()).isEqualTo(403);
+        assertThat(send("POST", "/api/v1/notices", parent(tenantA, sub), notice("Nope", "ALL")).statusCode()).isEqualTo(403);
+
+        assertThat(send("DELETE", "/api/v1/notices/" + staffNotice, token, null).statusCode()).isEqualTo(204);
+        assertThat(send("GET", "/api/v1/notices", teacher(tenantA), null).body()).doesNotContain("Staff meeting");
+        assertThat(send("GET", "/api/v1/notices", admin(tenantB), null).body()).isEqualTo("[]");
     }
 }

@@ -25,14 +25,16 @@ public class StudentService {
     private final SectionRepository sections;
     private final ClassRepository classes;
     private final TenantGuard guard;
+    private final GuardianLoginRepository logins;
 
     public StudentService(StudentRepository students, GuardianRepository guardians, SectionRepository sections,
-                          ClassRepository classes, TenantGuard guard) {
+                          ClassRepository classes, TenantGuard guard, GuardianLoginRepository logins) {
         this.students = students;
         this.guardians = guardians;
         this.sections = sections;
         this.classes = classes;
         this.guard = guard;
+        this.logins = logins;
     }
 
     @Transactional(readOnly = true)
@@ -153,11 +155,22 @@ public class StudentService {
         List<Guardian> list = known != null ? known : guardians.findByStudentId(s.getId());
         String[] p = placementOf(
                 placements(s.getSectionId() == null ? Set.of() : Set.of(s.getSectionId())), s.getSectionId());
-        return StudentDetail.from(s, list, p == null ? null : p[0], p == null ? null : p[1]);
+        return StudentDetail.from(s, list, portalEmails(s.getTenantId(), list),
+                p == null ? null : p[0], p == null ? null : p[1]);
+    }
+
+    private Set<String> portalEmails(UUID tenantId, List<Guardian> list) {
+        Set<String> emails = list.stream().map(Guardian::getEmail).filter(Objects::nonNull)
+                .map(e -> e.toLowerCase(Locale.ROOT)).collect(Collectors.toSet());
+        if (emails.isEmpty()) {
+            return Set.of();
+        }
+        return logins.findByTenantIdAndEmailLowerIn(tenantId, emails).stream()
+                .map(GuardianLogin::getEmailLower).collect(Collectors.toSet());
     }
 
     /** sectionId to [className, sectionName]. */
-    private Map<UUID, String[]> placements(Collection<UUID> sectionIds) {
+    Map<UUID, String[]> placements(Collection<UUID> sectionIds) {
         if (sectionIds.isEmpty()) return Map.of();
         List<Section> found = sections.findAllById(sectionIds);
         Map<UUID, SchoolClass> byId = classes.findAllById(
@@ -172,7 +185,7 @@ public class StudentService {
     }
 
     /** An immutable empty map throws on get(null), so students without a section need this guard. */
-    private static String[] placementOf(Map<UUID, String[]> placements, UUID sectionId) {
+    static String[] placementOf(Map<UUID, String[]> placements, UUID sectionId) {
         return sectionId == null ? null : placements.get(sectionId);
     }
 

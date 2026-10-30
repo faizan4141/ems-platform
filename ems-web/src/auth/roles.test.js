@@ -16,6 +16,9 @@ describe('homePathFor', () => {
     expect(homePathFor(['STUDENT'])).toBe('/no-access');
     expect(homePathFor([])).toBe('/no-access');
   });
+  it('sends parents to their portal', () => {
+    expect(homePathFor(['PARENT'])).toBe('/parent');
+  });
 });
 
 describe('hasAnyRole', () => {

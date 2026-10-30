@@ -34,6 +34,6 @@ const baseQuery = async (args, api, extraOptions) => {
 export const api = createApi({
   reducerPath: 'api',
   baseQuery,
-  tagTypes: ['Tenant', 'User', 'Academic', 'Student', 'Attendance'],
+  tagTypes: ['Tenant', 'User', 'Academic', 'Student', 'Attendance', 'Parent', 'Notice'],
   endpoints: () => ({}),
 });

@@ -24,12 +24,19 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health/**").permitAll()
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        // parents: only their own portal and the notices
+                        .requestMatchers(HttpMethod.GET, "/api/v1/parent/**").hasRole("PARENT")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/notices").hasAnyRole("TENANT_ADMIN", "TEACHER", "PARENT")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/notices").hasRole("TENANT_ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/notices/*").hasRole("TENANT_ADMIN")
+                        // school administration
                         .requestMatchers(HttpMethod.PUT, "/api/v1/school/profile", "/api/v1/academic-years/*/current",
                                 "/api/v1/students/*", "/api/v1/students/*/guardians").hasRole("TENANT_ADMIN")
-                        .requestMatchers(HttpMethod.PUT, "/api/v1/attendance/sections/*").hasAnyRole("TENANT_ADMIN", "TEACHER")
                         .requestMatchers(HttpMethod.POST, "/api/v1/academic-years", "/api/v1/classes",
                                 "/api/v1/classes/*/sections", "/api/v1/students", "/api/v1/students/import")
                         .hasRole("TENANT_ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/attendance/sections/*").hasAnyRole("TENANT_ADMIN", "TEACHER")
+                        // everything else that is readable belongs to school staff only
                         .requestMatchers(HttpMethod.GET, "/api/v1/**").hasAnyRole("TENANT_ADMIN", "TEACHER")
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(converter)));
