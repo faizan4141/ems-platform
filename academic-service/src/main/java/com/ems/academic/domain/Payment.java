@@ -28,6 +28,7 @@ public class Payment {
     @Column(name = "void_reason", length = 200) private String voidReason;
     @Column(name = "voided_by", length = 100) private String voidedBy;
     @Column(name = "voided_at") private Instant voidedAt;
+    @Column(name = "attempt_id", updatable = false) private UUID attemptId;
 
     protected Payment() {}
 
@@ -61,4 +62,6 @@ public class Payment {
     public String getReceiptNo() { return receiptNo; }
     public boolean isVoided() { return voided; }
     public String getVoidReason() { return voidReason; }
+    public void forAttempt(UUID attemptId) { this.attemptId = attemptId; }
+    public UUID getAttemptId() { return attemptId; }
 }

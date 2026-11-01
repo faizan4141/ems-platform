@@ -152,4 +152,23 @@ class FeePaymentServiceTest {
         assertThatThrownBy(() -> service.voidPayment(tenantId, paymentId, "again", "admin"))
                 .isInstanceOf(DuplicateResourceException.class);
     }
+
+    @Test
+    void adminsCannotRecordOnlinePaymentsByHand() {
+        assertThatThrownBy(() -> service.record(tenantId, chargeId, request("100", PaymentMethod.ONLINE, "x", null), "a"))
+                .isInstanceOf(InvalidRequestException.class);
+        verifyNoInteractions(charges, payments);
+    }
+
+    @Test
+    void onlinePaymentsCannotBeVoidedInTheApp() {
+        Payment online = new Payment(tenantId, chargeId, new BigDecimal("100.00"), PaymentMethod.ONLINE, "pay_1", TODAY,
+                "RCP-000009", "online", NOW, UUID.randomUUID());
+        UUID paymentId = UUID.randomUUID();
+        when(payments.findByIdAndTenantId(paymentId, tenantId)).thenReturn(Optional.of(online));
+
+        assertThatThrownBy(() -> service.voidPayment(tenantId, paymentId, "oops", "admin"))
+                .isInstanceOf(InvalidRequestException.class).hasMessageContaining("provider");
+        assertThat(online.isVoided()).isFalse();
+    }
 }

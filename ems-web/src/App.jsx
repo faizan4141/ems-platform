@@ -19,6 +19,8 @@ import NoticesPage from './pages/NoticesPage';
 import FeesPage from './pages/FeesPage';
 import FeeSetupPage from './pages/FeeSetupPage';
 import StudentFeesPage from './pages/StudentFeesPage';
+import OnlinePaymentsPage from './pages/OnlinePaymentsPage';
+import SimulatedCheckoutPage from './pages/SimulatedCheckoutPage';
 
 function AuthGate({ children }) {
   const dispatch = useDispatch();
@@ -62,6 +64,8 @@ export default function App() {
           <Route path="fees" element={<RequireRole roles={['TENANT_ADMIN']}><FeesPage /></RequireRole>} />
           <Route path="fees/setup" element={<RequireRole roles={['TENANT_ADMIN']}><FeeSetupPage /></RequireRole>} />
           <Route path="fees/students/:id" element={<RequireRole roles={['TENANT_ADMIN']}><StudentFeesPage /></RequireRole>} />
+          <Route path="fees/online" element={<RequireRole roles={['TENANT_ADMIN']}><OnlinePaymentsPage /></RequireRole>} />
+          <Route path="pay/simulated/:providerRef" element={<RequireRole roles={['PARENT']}><SimulatedCheckoutPage /></RequireRole>} />
         </Route>
       </Routes>
     </AuthGate>

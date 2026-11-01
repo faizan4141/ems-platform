@@ -81,3 +81,11 @@ a.nav-item:hover { background: var(--bg); color: var(--text); }
   .receipt { position: absolute; inset: 0; width: 100%; max-width: none; border: 0; box-shadow: none; }
   .receipt .dialog-actions { display: none; }
 }
+.banner { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 16px;
+  border-radius: 10px; margin-bottom: 16px; }
+.banner-ok { background: var(--ok-soft); color: var(--ok); }
+.banner-warn { background: var(--warn-soft); color: var(--warn); }
+.banner-bad { background: var(--bad-soft); color: var(--bad); }
+.check { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.checkout { max-width: 520px; margin: 8vh auto; }
+.sim-note { background: var(--warn-soft); color: var(--warn); padding: 10px 14px; border-radius: 10px; margin-bottom: 16px; }

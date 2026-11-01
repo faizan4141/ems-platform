@@ -26,6 +26,7 @@ public class SecurityConfig {
                 .authorizeExchange(exchanges -> exchanges
                         .pathMatchers(HttpMethod.OPTIONS).permitAll()
                         .pathMatchers("/actuator/health/**").permitAll()
+                        .pathMatchers(HttpMethod.POST, "/api/v1/payments/webhook").permitAll()
                         .anyExchange().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(Customizer.withDefaults()))
                 .build();

@@ -51,6 +51,9 @@ public class FeePaymentService {
         if (paidOn.isAfter(today)) {
             throw new InvalidRequestException("The payment date cannot be in the future");
         }
+        if (req.method() == PaymentMethod.ONLINE) {
+            throw new InvalidRequestException("Online payments are recorded automatically");
+        }
         String reference = clean(req.reference());
         if (reference == null && NEEDS_REFERENCE.contains(req.method())) {
             throw new InvalidRequestException("A reference is needed for "
@@ -85,6 +88,10 @@ public class FeePaymentService {
         guard.requireActive(tenantId);
         Payment payment = payments.findByIdAndTenantId(paymentId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment not found"));
+        if (payment.getMethod() == PaymentMethod.ONLINE) {
+            throw new InvalidRequestException(
+                    "Online payments cannot be voided here. Refund them through the payment provider.");
+        }
         // Same lock as recording, so a void and a new payment on one fee never interleave.
         FeeCharge charge = charges.lockById(payment.getChargeId(), tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Fee not found"));

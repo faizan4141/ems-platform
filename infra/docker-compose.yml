@@ -169,6 +169,8 @@ services:
       <<: *jwt-env
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}?currentSchema=academic
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      PAYMENTS_WEBHOOK_SECRET: ${PAYMENTS_WEBHOOK_SECRET:-dev-only-secret-change-me}
+      APP_BASE_URL: http://localhost:5173
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8083/actuator/health"]
       interval: 15s

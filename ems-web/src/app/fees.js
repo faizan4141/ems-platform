@@ -9,7 +9,8 @@ export const METHODS = [
 
 export const NEEDS_REFERENCE = ['CHEQUE', 'UPI', 'BANK_TRANSFER'];
 
-export const methodLabel = (method) => METHODS.find((m) => m.value === method)?.label ?? method;
+export const methodLabel = (method) =>
+  method === 'ONLINE' ? 'Online' : METHODS.find((m) => m.value === method)?.label ?? method;
 
 export const FEE_STATUS = {
   PAID: { label: 'Paid', tone: 'ok' },

@@ -55,6 +55,11 @@ ems:
     currency: INR
     due-soon-days: 3
     reminder-interval-days: 7
+  payments:
+    provider: simulated
+    webhook-secret: ${PAYMENTS_WEBHOOK_SECRET:dev-only-secret-change-me}
+    app-base-url: ${APP_BASE_URL:http://localhost:5173}
+    pending-window-minutes: 30
 
 management:
   endpoints:

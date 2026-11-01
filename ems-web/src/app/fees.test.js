@@ -39,4 +39,8 @@ describe('payment methods and statuses', () => {
     expect(Object.keys(FEE_STATUS).sort()).toEqual(['DUE', 'OVERDUE', 'PAID', 'PARTIAL']);
     expect(METHODS.map((m) => m.value)).toContain('CASH');
   });
+  it('labels online payments, which admins cannot record by hand', () => {
+    expect(methodLabel('ONLINE')).toBe('Online');
+    expect(METHODS.map((m) => m.value)).not.toContain('ONLINE');
+  });
 });

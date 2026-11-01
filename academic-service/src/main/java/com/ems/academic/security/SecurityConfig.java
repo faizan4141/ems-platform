@@ -24,6 +24,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health/**").permitAll()
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/payments/webhook").permitAll()   // signature-checked in the service
+                        .requestMatchers(HttpMethod.POST, "/api/v1/parent/children/*/pay",
+                                "/api/v1/payments/simulated/*/complete").hasRole("PARENT")
                         // parents: only their own portal and the notices
                         .requestMatchers(HttpMethod.GET, "/api/v1/parent/**").hasRole("PARENT")
                         .requestMatchers(HttpMethod.GET, "/api/v1/notices").hasAnyRole("TENANT_ADMIN", "TEACHER", "PARENT")

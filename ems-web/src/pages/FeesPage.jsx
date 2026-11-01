@@ -40,6 +40,7 @@ export default function FeesPage() {
         action={(
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-secondary" disabled={reminding} onClick={onRemind}>{reminding ? 'Sending…' : 'Send reminders'}</button>
+            <Link className="btn btn-secondary" to="/fees/online">Online payments</Link>
             <Link className="btn btn-primary" to="/fees/setup">Fee setup</Link>
           </div>
         )} />

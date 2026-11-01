@@ -66,7 +66,7 @@ export default function StudentFeesPage() {
       <section className="card">
         <h2>Payments</h2>
         <PaymentsList ledger={ledger} onReceipt={setReceipt}
-          renderAction={(p) => !p.voided && (
+          renderAction={(p) => !p.voided && p.method !== 'ONLINE' && (
             <button className="btn btn-secondary" onClick={() => setVoidTarget(p)}>Void</button>
           )} />
       </section>

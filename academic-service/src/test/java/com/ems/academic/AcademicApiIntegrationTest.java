@@ -20,6 +20,8 @@ import org.springframework.context.event.EventListener;
 import com.ems.academic.domain.GuardianLogin;
 import com.ems.academic.repository.GuardianLoginRepository;
 import com.ems.academic.event.FeeReminderEvent;
+import com.ems.academic.payment.WebhookEvent;
+import com.ems.academic.payment.WebhookSigner;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -36,12 +38,14 @@ import java.util.regex.Pattern;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"spring.kafka.listener.auto-startup=false", "ems.kafka.publish=false", "ems.scheduling.enabled=false"})
+        properties = {"spring.kafka.listener.auto-startup=false", "ems.kafka.publish=false", "ems.scheduling.enabled=false", "ems.payments.webhook-secret=test-secret"})
 class AcademicApiIntegrationTest {
 
     @Container
@@ -216,6 +220,63 @@ class AcademicApiIntegrationTest {
     private String ledger(String token, String studentId) throws Exception {
         return send("GET", "/api/v1/fees/students/" + studentId, token, null).body();
     }
+
+    private static final Pattern PROVIDER_REF = Pattern.compile("/pay/simulated/(sim_[a-z0-9]+)");
+    private static final Pattern ATTEMPT_ID = Pattern.compile("\"attemptId\":\"([0-9a-f-]{36})\"");
+
+    private record Family(String admin, String parent, String studentId, String chargeA, String chargeB) {}
+
+    /** A student with two fees (A: 100.00 due first, B: 50.00 due later) and a parent who can see them. */
+    private Family onlineFamily() throws Exception {
+        String admin = admin(tenantA);
+        String[] cs = classAndSection(admin);
+        String student = idOf(send("POST", "/api/v1/students", admin,
+                studentJson("O-1", cs[1], guardianWithEmail("raj@example.com"))).body());
+        UUID sub = UUID.randomUUID();
+        logins.save(new GuardianLogin(sub, tenantA, "raj@example.com"));
+        LocalDate today = LocalDate.now(clock);
+        send("POST", "/api/v1/fees/items", admin, feeItem(cs[0], "Tuition", "100.00", today.plusDays(5)));
+        send("POST", "/api/v1/fees/items", admin, feeItem(cs[0], "Transport", "50.00", today.plusDays(6)));
+        send("POST", "/api/v1/fees/classes/" + cs[0] + "/generate", admin, null);
+        String parent = parent(tenantA, sub);
+        String ledger = send("GET", "/api/v1/parent/children/" + student + "/fees", parent, null).body();
+        return new Family(admin, parent, student, nthId(ledger, 0), nthId(ledger, 1));
+    }
+
+    private HttpResponse<String> pay(Family f, String key, String... chargeIds) throws Exception {
+        String ids = "\"" + String.join("\",\"", chargeIds) + "\"";
+        return send("POST", "/api/v1/parent/children/" + f.studentId() + "/pay", f.parent(),
+                "{\"chargeIds\":[" + ids + "],\"idempotencyKey\":\"" + key + "\"}");
+    }
+
+    private static String providerRef(String body) {
+        Matcher m = PROVIDER_REF.matcher(body);
+        assertThat(m.find()).as("checkout url in: " + body).isTrue();
+        return m.group(1);
+    }
+
+    private static String attemptIdOf(String body) {
+        Matcher m = ATTEMPT_ID.matcher(body);
+        assertThat(m.find()).as("attemptId in: " + body).isTrue();
+        return m.group(1);
+    }
+
+    private String attemptStatus(Family f, String attemptId) throws Exception {
+        return send("GET", "/api/v1/parent/payment-attempts/" + attemptId, f.parent(), null).body();
+    }
+
+    private HttpResponse<String> webhook(String type, String ref, String amount, String signatureOverride) throws Exception {
+        WebhookEvent event = new WebhookEvent(UUID.randomUUID().toString(), type, ref, "pay_test", amount, "INR", "");
+        String signature = signatureOverride != null ? signatureOverride : WebhookSigner.sign("test-secret", event);
+        String form = "eventId=" + enc(event.eventId()) + "&type=" + enc(type) + "&providerRef=" + enc(ref)
+                + "&providerPaymentId=pay_test&amount=" + enc(amount) + "&currency=INR&failureReason=";
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/payments/webhook"))
+                .header("Content-Type", "application/x-www-form-urlencoded").header("X-Signature", signature)
+                .POST(BodyPublishers.ofString(form)).build();
+        return CLIENT.send(request, BodyHandlers.ofString());
+    }
+
+    private static String enc(String value) { return URLEncoder.encode(value, StandardCharsets.UTF_8); }
 
     @Test
     void rejectsRequestsWithoutToken() throws Exception {
@@ -654,5 +715,108 @@ class AcademicApiIntegrationTest {
         assertThat(send("POST", "/api/v1/fees/charges/" + chargeId + "/payments", admin(tenantB),
                 payment("10.00", UUID.randomUUID().toString())).statusCode()).isEqualTo(404);
         assertThat(send("GET", "/api/v1/fees/students/" + mine, admin(tenantB), null).statusCode()).isEqualTo(404);
+    }
+
+    @Test
+    void onlinePayment_success_createsOneReceiptPerFee_andIsReplaySafe() throws Exception {
+        Family f = onlineFamily();
+        String key = UUID.randomUUID().toString();
+
+        HttpResponse<String> started = pay(f, key, f.chargeA(), f.chargeB());
+        assertThat(started.statusCode()).isEqualTo(201);
+        String ref = providerRef(started.body());
+        String attemptId = attemptIdOf(started.body());
+        assertThat(attemptIdOf(pay(f, key, f.chargeA(), f.chargeB()).body()))
+                .as("the same request key returns the same checkout").isEqualTo(attemptId);
+        assertThat(attemptStatus(f, attemptId)).contains("\"status\":\"PENDING\"").contains("\"amount\":150.00");
+        assertThat(pay(f, UUID.randomUUID().toString(), f.chargeA()).statusCode())
+                .as("one payment in flight per fee").isEqualTo(409);
+
+        assertThat(send("POST", "/api/v1/payments/simulated/" + ref + "/complete?outcome=success", f.parent(), null)
+                .statusCode()).isEqualTo(200);
+        assertThat(attemptStatus(f, attemptId)).contains("\"status\":\"SUCCEEDED\"");
+
+        String ledger = send("GET", "/api/v1/fees/students/" + f.studentId(), f.admin(), null).body();
+        assertThat(ledger).contains("\"balance\":0.00");
+        assertThat(count(ledger, "\"method\":\"ONLINE\"")).isEqualTo(2);
+
+        assertThat(webhook(WebhookEvent.SUCCEEDED, ref, "150.00", null).statusCode()).isEqualTo(200);
+        assertThat(count(send("GET", "/api/v1/fees/students/" + f.studentId(), f.admin(), null).body(),
+                "\"method\":\"ONLINE\"")).as("a replayed webhook adds nothing").isEqualTo(2);
+    }
+
+    @Test
+    void aFailedPaymentChangesNothing_andCanBeRetried() throws Exception {
+        Family f = onlineFamily();
+        HttpResponse<String> started = pay(f, UUID.randomUUID().toString(), f.chargeA(), f.chargeB());
+        String ref = providerRef(started.body());
+
+        send("POST", "/api/v1/payments/simulated/" + ref + "/complete?outcome=failure", f.parent(), null);
+
+        assertThat(attemptStatus(f, attemptIdOf(started.body()))).contains("\"status\":\"FAILED\"");
+        assertThat(send("GET", "/api/v1/fees/students/" + f.studentId(), f.admin(), null).body())
+                .contains("\"balance\":150.00").doesNotContain("ONLINE");
+        assertThat(pay(f, UUID.randomUUID().toString(), f.chargeA(), f.chargeB()).statusCode())
+                .as("a failed attempt no longer blocks a new one").isEqualTo(201);
+    }
+
+    @Test
+    void theServerGuardsWhoCanPayForWhat() throws Exception {
+        Family f = onlineFamily();
+        String body = "{\"chargeIds\":[\"" + f.chargeA() + "\"],\"idempotencyKey\":\"" + UUID.randomUUID() + "\"}";
+
+        assertThat(send("POST", "/api/v1/parent/children/" + f.studentId() + "/pay", f.admin(), body).statusCode())
+                .as("only parents start payments").isEqualTo(403);
+        assertThat(send("POST", "/api/v1/parent/children/" + UUID.randomUUID() + "/pay", f.parent(), body).statusCode())
+                .as("not their child").isEqualTo(404);
+
+        HttpResponse<String> started = pay(f, UUID.randomUUID().toString(), f.chargeA());
+        String ref = providerRef(started.body());
+        String stranger = parent(tenantA, UUID.randomUUID());
+        assertThat(send("POST", "/api/v1/payments/simulated/" + ref + "/complete?outcome=success", stranger, null)
+                .statusCode()).as("another parent cannot complete or read it").isEqualTo(404);
+        assertThat(send("GET", "/api/v1/parent/payment-attempts/" + attemptIdOf(started.body()), stranger, null)
+                .statusCode()).isEqualTo(404);
+
+        send("POST", "/api/v1/payments/simulated/" + ref + "/complete?outcome=success", f.parent(), null);
+        assertThat(pay(f, UUID.randomUUID().toString(), f.chargeA()).statusCode())
+                .as("an already-paid fee cannot be paid again").isEqualTo(400);
+    }
+
+    @Test
+    void theWebhookTrustsOnlyGenuinelySignedEvents() throws Exception {
+        Family f = onlineFamily();
+        HttpResponse<String> started = pay(f, UUID.randomUUID().toString(), f.chargeA(), f.chargeB());
+        String ref = providerRef(started.body());
+        String attemptId = attemptIdOf(started.body());
+
+        assertThat(webhook(WebhookEvent.SUCCEEDED, ref, "150.00", "deadbeef").statusCode()).isEqualTo(401);
+        assertThat(webhook(WebhookEvent.SUCCEEDED, "sim_unknown", "150.00", null).statusCode()).isEqualTo(404);
+        assertThat(attemptStatus(f, attemptId)).contains("\"status\":\"PENDING\"");
+
+        // genuinely signed, but not the amount we expected: held for review, nothing applied
+        assertThat(webhook(WebhookEvent.SUCCEEDED, ref, "149.00", null).statusCode()).isEqualTo(200);
+        assertThat(attemptStatus(f, attemptId)).contains("\"status\":\"REVIEW\"");
+        assertThat(send("GET", "/api/v1/fees/students/" + f.studentId(), f.admin(), null).body())
+                .contains("\"balance\":150.00").doesNotContain("ONLINE");
+    }
+
+    @Test
+    void aPaymentForAFeePaidInCashMeanwhileIsHeldForReview() throws Exception {
+        Family f = onlineFamily();
+        HttpResponse<String> started = pay(f, UUID.randomUUID().toString(), f.chargeA());   // fee A, 100.00
+        String ref = providerRef(started.body());
+
+        send("POST", "/api/v1/fees/charges/" + f.chargeA() + "/payments", f.admin(), payment("100.00", UUID.randomUUID().toString()));
+        assertThat(webhook(WebhookEvent.SUCCEEDED, ref, "100.00", null).statusCode()).isEqualTo(200);
+
+        assertThat(attemptStatus(f, attemptIdOf(started.body()))).contains("\"status\":\"REVIEW\"");
+        assertThat(send("GET", "/api/v1/fees/students/" + f.studentId(), f.admin(), null).body()).doesNotContain("ONLINE");
+
+        String list = send("GET", "/api/v1/fees/online-payments", f.admin(), null).body();
+        assertThat(list).contains("REVIEW").contains("O-1").contains("refund");
+        assertThat(send("GET", "/api/v1/fees/online-payments", teacher(tenantA), null).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/fees/online-payments", f.parent(), null).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/fees/online-payments", admin(tenantB), null).body()).isEqualTo("[]");
     }
 }

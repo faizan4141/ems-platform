@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
+import com.ems.academic.dto.OnlinePaymentDtos.AttemptRow;
 
 import java.util.List;
 import java.util.UUID;
@@ -20,13 +21,15 @@ public class FeeController {
     private final FeeLedgerService ledger;
     private final FeePaymentService paymentService;
     private final FeeReminderService reminders;
+    private final OnlinePaymentService online;
 
     public FeeController(FeeItemService items, FeeLedgerService ledger, FeePaymentService paymentService,
-                         FeeReminderService reminders) {
+                         FeeReminderService reminders, OnlinePaymentService online) {
         this.items = items;
         this.ledger = ledger;
         this.paymentService = paymentService;
         this.reminders = reminders;
+        this.online = online;
     }
 
     @GetMapping("/summary")
@@ -82,5 +85,10 @@ public class FeeController {
     @PostMapping("/reminders/run")
     public ReminderRunResponse runReminders(@AuthenticationPrincipal Jwt jwt) {
         return new ReminderRunResponse(reminders.remindTenant(TenantClaims.requireTenantId(jwt)));
+    }
+
+    @GetMapping("/online-payments")
+    public List<AttemptRow> onlinePayments(@AuthenticationPrincipal Jwt jwt) {
+        return online.listForAdmin(TenantClaims.requireTenantId(jwt));
     }
 }

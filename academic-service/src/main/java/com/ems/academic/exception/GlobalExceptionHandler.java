@@ -10,6 +10,8 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
     @ExceptionHandler({TenantNotFoundException.class, ResourceNotFoundException.class})
     ProblemDetail notFound(RuntimeException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
@@ -34,5 +36,17 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(InvalidRequestException.class)
     ProblemDetail invalid(InvalidRequestException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidSignatureException.class)
+    ProblemDetail badSignature(InvalidSignatureException ex) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
+    }
+
+    @ExceptionHandler(PaymentGatewayException.class)
+    ProblemDetail gatewayDown(PaymentGatewayException ex) {
+        log.error("Payment provider failure", ex);   // details stay in the log
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY,
+                "The payment service is not available right now. Please try again shortly.");
     }
 }

@@ -10,13 +10,68 @@ import { useGetChildFeesQuery } from '../services/feesApi';
 import { formatMoney } from '../app/fees';
 import { ChargesTable, PaymentsList } from '../components/LedgerTables';
 import Receipt from '../components/Receipt';
+import { useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useDispatch } from 'react-redux';
+import { api } from '../services/api';
+import { useGetAttemptQuery, useStartPaymentMutation } from '../services/feesApi';
+import { newKey } from '../app/fees';
+import { payableCharges, returnMessage, safeRedirectUrl, selectedTotal } from '../app/onlinePay';
+
+function PaymentBanner() {
+  const dispatch = useDispatch();
+  const [params, setParams] = useSearchParams();
+  const id = params.get('payment');
+  const { data, refetch } = useGetAttemptQuery(id, { skip: !id });
+  const status = data?.status;
+
+  // Poll only while the result is unknown (a real provider may redirect back before its webhook arrives).
+  useEffect(() => {
+    if (!id || (status && status !== 'PENDING')) return undefined;
+    const timer = setInterval(refetch, 3000);
+    return () => clearInterval(timer);
+  }, [id, status, refetch]);
+
+  // Once the result is known, refresh the fee balances shown below.
+  useEffect(() => {
+    if (status && status !== 'PENDING') dispatch(api.util.invalidateTags(['Fees']));
+  }, [status, dispatch]);
+
+  if (!id || !data) return null;
+  const view = returnMessage(data.status);
+  return (
+    <div className={`banner banner-${view.tone}`} role="status">
+      <span>{view.text}</span>
+      <button className="btn-link" onClick={() => setParams({})}>Dismiss</button>
+    </div>
+  );
+}
 
 function FeesCard({ studentId }) {
   const { data: ledger, error } = useGetChildFeesQuery(studentId);
   const [receipt, setReceipt] = useState(null);
+  const [off, setOff] = useState([]);                       // fees the parent un-ticked
+  const [startPayment, { isLoading: starting, error: payError }] = useStartPaymentMutation();
+
+  const payable = ledger ? payableCharges(ledger) : [];
+  const chosen = payable.filter((c) => !off.includes(c.id)).map((c) => c.id);
+  const chosenKey = chosen.join(',');
+  // One key per selection: clicking Pay twice returns the same checkout instead of two payments.
+  const idempotencyKey = useMemo(() => newKey(), [chosenKey]);
 
   if (error) return <ErrorNotice error={error} />;
   if (!ledger || ledger.charges.length === 0) return null;   // the school has not billed anything yet
+
+  const toggle = (id) => setOff(off.includes(id) ? off.filter((x) => x !== id) : [...off, id]);
+  const total = selectedTotal(payable, chosen);
+
+  const pay = async () => {
+    try {
+      const result = await startPayment({ studentId, chargeIds: chosen, idempotencyKey }).unwrap();
+      const url = safeRedirectUrl(result.checkoutUrl);
+      if (url) window.location.assign(url);
+    } catch { /* shown below */ }
+  };
 
   return (
     <section className="card">
@@ -27,9 +82,25 @@ function FeesCard({ studentId }) {
         </Chip>
       </div>
       <ChargesTable ledger={ledger} />
+
+      {payable.length > 0 && (
+        <div className="card card-accent" style={{ marginTop: 16, marginBottom: 0 }}>
+          <h2>Pay online</h2>
+          {payable.map((c) => (
+            <label key={c.id} className="check">
+              <input type="checkbox" checked={!off.includes(c.id)} onChange={() => toggle(c.id)} />
+              <span>{c.name} <span className="muted">· {formatMoney(c.balance, ledger.currency)}</span></span>
+            </label>
+          ))}
+          <button className="btn btn-primary" disabled={starting || chosen.length === 0} onClick={pay} style={{ marginTop: 8 }}>
+            {starting ? 'Please wait…' : `Pay ${formatMoney(total, ledger.currency)} online`}
+          </button>
+          <ErrorNotice error={payError} />
+        </div>
+      )}
+
       <h2 style={{ marginTop: 20 }}>Payments</h2>
       <PaymentsList ledger={ledger} onReceipt={setReceipt} />
-      <p className="muted" style={{ marginBottom: 0 }}>To pay a fee, please contact the school office. Online payment is coming soon.</p>
       <Receipt ledger={ledger} payment={receipt} onClose={() => setReceipt(null)} />
     </section>
   );
@@ -92,6 +163,7 @@ export default function ParentHomePage() {
   return (
     <>
       <PageHeader title={`Hello, ${firstName || 'there'}`} subtitle="Here is how your child is doing at school." />
+      <PaymentBanner></PaymentBanner>
       <ErrorNotice error={error} />
       {isLoading && <div className="skeleton" style={{ width: '40%' }} />}
 
