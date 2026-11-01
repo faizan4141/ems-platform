@@ -40,6 +40,8 @@ import java.time.LocalDate;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -277,6 +279,48 @@ class AcademicApiIntegrationTest {
     }
 
     private static String enc(String value) { return URLEncoder.encode(value, StandardCharsets.UTF_8); }
+
+    private static List<String> valuesOf(String body, String key) {
+        Matcher m = Pattern.compile("\"" + key + "\":\"([0-9a-f-]{36})\"").matcher(body);
+        List<String> found = new ArrayList<>();
+        while (m.find()) found.add(m.group(1));
+        return found;
+    }
+
+    private String subject(String token, String name) throws Exception {
+        return idOf(send("POST", "/api/v1/subjects", token, "{\"name\":\"" + name + "\"}").body());
+    }
+
+    /** triples of studentId, examSubjectId, value where value is "85.5", "AB" (absent) or "" (clear). */
+    private static String marksBody(String... t) {
+        StringBuilder sb = new StringBuilder("{\"entries\":[");
+        for (int i = 0; i < t.length; i += 3) {
+            if (i > 0) sb.append(',');
+            sb.append("{\"studentId\":\"").append(t[i]).append("\",\"examSubjectId\":\"").append(t[i + 1]).append("\",");
+            if (t[i + 2].equals("AB")) sb.append("\"absent\":true");
+            else if (t[i + 2].isEmpty()) sb.append("\"marks\":null,\"absent\":false");
+            else sb.append("\"marks\":\"").append(t[i + 2]).append("\"");
+            sb.append('}');
+        }
+        return sb.append("]}").toString();
+    }
+
+    private record ExamSetup(String admin, String classId, String sectionId, String examId, String english, String maths) {}
+
+    /** A class with Term 1 (English 50, pass 18; Mathematics 100, pass 35). Subjects sort alphabetically. */
+    private ExamSetup examSetup(UUID tenant) throws Exception {
+        String token = admin(tenant);
+        String[] cs = classAndSection(token);
+        String eng = subject(token, "English");
+        String math = subject(token, "Mathematics");
+        String body = "{\"classId\":\"" + cs[0] + "\",\"name\":\"Term 1\",\"subjects\":["
+                + "{\"subjectId\":\"" + math + "\",\"maxMarks\":\"100\",\"passMarks\":\"35\"},"
+                + "{\"subjectId\":\"" + eng + "\",\"maxMarks\":\"50\",\"passMarks\":\"18\"}]}";
+        HttpResponse<String> created = send("POST", "/api/v1/exams", token, body);
+        assertThat(created.statusCode()).isEqualTo(201);
+        List<String> examSubjects = valuesOf(created.body(), "examSubjectId");   // English first, then Mathematics
+        return new ExamSetup(token, cs[0], cs[1], idOf(created.body()), examSubjects.get(0), examSubjects.get(1));
+    }
 
     @Test
     void rejectsRequestsWithoutToken() throws Exception {
@@ -818,5 +862,147 @@ class AcademicApiIntegrationTest {
         assertThat(send("GET", "/api/v1/fees/online-payments", teacher(tenantA), null).statusCode()).isEqualTo(403);
         assertThat(send("GET", "/api/v1/fees/online-payments", f.parent(), null).statusCode()).isEqualTo(403);
         assertThat(send("GET", "/api/v1/fees/online-payments", admin(tenantB), null).body()).isEqualTo("[]");
+    }
+
+    @Test
+    void gradingScale_defaultsUntilTheSchoolSavesItsOwn() throws Exception {
+        String token = admin(tenantA);
+
+        String defaults = send("GET", "/api/v1/grading-scale", teacher(tenantA), null).body();
+        assertThat(count(defaults, "\"grade\":\"")).isEqualTo(7);
+        assertThat(defaults).contains("\"grade\":\"A+\"");
+
+        String custom = "{\"bands\":[{\"minPercent\":\"0\",\"grade\":\"Fail\",\"label\":\"Below 50\"},{\"minPercent\":\"50\",\"grade\":\"Pass\"}]}";
+        assertThat(send("PUT", "/api/v1/grading-scale", token, custom).statusCode()).isEqualTo(200);
+        String saved = send("GET", "/api/v1/grading-scale", token, null).body();
+        assertThat(saved).contains("\"grade\":\"Pass\"").doesNotContain("A+");
+
+        assertThat(send("PUT", "/api/v1/grading-scale", token, "{\"bands\":[{\"minPercent\":\"50\",\"grade\":\"Pass\"}]}").statusCode())
+                .as("the lowest grade must start at 0").isEqualTo(400);
+        assertThat(send("PUT", "/api/v1/grading-scale", teacher(tenantA), custom).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/grading-scale", admin(tenantB), null).body()).as("other schools keep the default").contains("A+");
+    }
+
+    @Test
+    void subjects_areUniquePerSchool_andProtectedWhileInUse() throws Exception {
+        ExamSetup s = examSetup(tenantA);
+
+        assertThat(send("POST", "/api/v1/subjects", s.admin(), "{\"name\":\"english\"}").statusCode()).isEqualTo(409);
+        assertThat(send("POST", "/api/v1/subjects", teacher(tenantA), "{\"name\":\"Science\"}").statusCode()).isEqualTo(403);
+
+        String science = subject(s.admin(), "Science");
+        assertThat(send("DELETE", "/api/v1/subjects/" + science, s.admin(), null).statusCode()).isEqualTo(204);
+        String english = valuesOf(send("GET", "/api/v1/subjects", s.admin(), null).body(), "id").get(0);
+        assertThat(send("DELETE", "/api/v1/subjects/" + english, s.admin(), null).statusCode()).as("used by an exam").isEqualTo(409);
+    }
+
+    @Test
+    void examLifecycle_enter_publish_lock_results_reopen_audit() throws Exception {
+        ExamSetup s = examSetup(tenantA);
+        String one = studentInSection(s.admin(), "E-1", s.sectionId());
+        String two = studentInSection(s.admin(), "E-2", s.sectionId());
+        String path = "/api/v1/exams/" + s.examId();
+
+        assertThat(send("POST", "/api/v1/exams", s.admin(), "{\"classId\":\"" + s.classId() + "\",\"name\":\"term 1\",\"subjects\":[]}").statusCode())
+                .isEqualTo(400);
+
+        String teacher = teacher(tenantA);
+        assertThat(send("PUT", path + "/marks", teacher, marksBody(one, s.maths(), "80")).statusCode()).isEqualTo(200);
+        assertThat(send("POST", path + "/publish", s.admin(), null).statusCode()).as("marks are missing").isEqualTo(400);
+
+        assertThat(send("PUT", path + "/marks", teacher,
+                marksBody(one, s.english(), "40", two, s.english(), "10", two, s.maths(), "90")).body()).contains("\"changed\":3");
+        assertThat(send("POST", path + "/publish", teacher, null).statusCode()).as("only admins publish").isEqualTo(403);
+        HttpResponse<String> published = send("POST", path + "/publish", s.admin(), null);
+        assertThat(published.statusCode()).isEqualTo(200);
+        assertThat(published.body()).contains("\"status\":\"PUBLISHED\"");
+
+        assertThat(send("PUT", path + "/marks", teacher, marksBody(one, s.maths(), "81")).statusCode()).as("locked once published").isEqualTo(400);
+
+        String card = send("GET", path + "/report-card/" + one, s.admin(), null).body();
+        assertThat(card).contains("\"totalMarks\":120.00").contains("\"totalMax\":150.00").contains("\"percent\":80.00")
+                .contains("\"grade\":\"A\"").contains("\"result\":\"PASS\"");
+        String failing = send("GET", path + "/report-card/" + two, s.admin(), null).body();
+        assertThat(failing).contains("\"percent\":66.67").contains("\"grade\":\"B\"").contains("\"result\":\"FAIL\"");
+        assertThat(send("GET", path + "/results", teacher, null).body()).contains("\"result\":\"PASS\"").contains("\"result\":\"FAIL\"");
+
+        assertThat(send("POST", path + "/reopen", s.admin(), "{\"reason\":\"Wrong English mark\"}").body()).contains("\"status\":\"DRAFT\"");
+        assertThat(send("PUT", path + "/marks", teacher, marksBody(two, s.english(), "20")).body()).contains("\"changed\":1");
+        assertThat(send("PUT", path + "/marks", teacher, marksBody(two, s.english(), "20")).body()).as("no change, no audit").contains("\"changed\":0");
+
+        String audit = send("GET", path + "/audit", s.admin(), null).body();
+        assertThat(audit).contains("PUBLISH").contains("REOPEN").contains("Wrong English mark").contains("10.00 → 20.00");
+        assertThat(send("GET", path + "/audit", teacher, null).statusCode()).as("the audit trail is for admins").isEqualTo(403);
+        assertThat(send("POST", path + "/publish", s.admin(), null).statusCode()).isEqualTo(200);
+        assertThat(send("DELETE", path, s.admin(), null).statusCode()).as("published exams cannot be deleted").isEqualTo(400);
+    }
+
+    @Test
+    void marksAreValidatedStrictly_andCanBeClearedAgain() throws Exception {
+        ExamSetup s = examSetup(tenantA);
+        String student = studentInSection(s.admin(), "E-1", s.sectionId());
+        String path = "/api/v1/exams/" + s.examId() + "/marks";
+        String teacher = teacher(tenantA);
+
+        assertThat(send("PUT", path, teacher, marksBody(student, s.maths(), "100.01")).statusCode()).as("above the maximum").isEqualTo(400);
+        assertThat(send("PUT", path, teacher, marksBody(student, s.maths(), "-1")).statusCode()).isEqualTo(400);
+        assertThat(send("PUT", path, teacher, marksBody(student, s.maths(), "85.555")).statusCode()).isEqualTo(400);
+        assertThat(send("PUT", path, teacher, "{\"entries\":[{\"studentId\":\"" + student + "\",\"examSubjectId\":\"" + s.maths()
+                + "\",\"marks\":\"5\",\"absent\":true}]}").statusCode()).as("absent with marks").isEqualTo(400);
+        assertThat(send("PUT", path, teacher, marksBody(UUID.randomUUID().toString(), s.maths(), "50")).statusCode()).as("not in this class").isEqualTo(400);
+        assertThat(send("PUT", path, teacher, marksBody(student, UUID.randomUUID().toString(), "50")).statusCode()).as("not in this exam").isEqualTo(400);
+        assertThat(send("PUT", path, teacher, marksBody(student, s.maths(), "50", student, s.maths(), "60")).statusCode()).as("duplicate entry").isEqualTo(400);
+
+        assertThat(send("PUT", path, teacher, marksBody(student, s.maths(), "85.5")).statusCode()).isEqualTo(200);
+        assertThat(send("GET", path, teacher, null).body()).contains("\"marks\":85.50");
+        assertThat(send("PUT", path, teacher, marksBody(student, s.maths(), "AB")).statusCode()).isEqualTo(200);
+        assertThat(send("GET", path, teacher, null).body()).contains("\"absent\":true");
+        assertThat(send("PUT", path, teacher, marksBody(student, s.maths(), "")).statusCode()).isEqualTo(200);
+        assertThat(send("GET", path, teacher, null).body()).doesNotContain("\"marks\":85").doesNotContain("\"absent\":true");
+    }
+
+    @Test
+    void parentsSeeOnlyPublishedResultsOfTheirOwnChild() throws Exception {
+        ExamSetup s = examSetup(tenantA);
+        String mine = idOf(send("POST", "/api/v1/students", s.admin(),
+                studentJson("P-1", s.sectionId(), guardianWithEmail("raj@example.com"))).body());
+        String other = idOf(send("POST", "/api/v1/students", s.admin(),
+                studentJson("P-2", s.sectionId(), guardianWithEmail("someone@example.com"))).body());
+        UUID sub = UUID.randomUUID();
+        logins.save(new GuardianLogin(sub, tenantA, "raj@example.com"));
+        String parent = parent(tenantA, sub);
+        String path = "/api/v1/exams/" + s.examId();
+
+        send("PUT", path + "/marks", teacher(tenantA), marksBody(mine, s.english(), "40", mine, s.maths(), "80",
+                other, s.english(), "30", other, s.maths(), "70"));
+        assertThat(send("GET", "/api/v1/parent/children/" + mine + "/results", parent, null).body()).as("drafts are hidden").isEqualTo("[]");
+        assertThat(send("GET", "/api/v1/parent/children/" + mine + "/results/" + s.examId(), parent, null).statusCode()).isEqualTo(404);
+
+        send("POST", path + "/publish", s.admin(), null);
+        String list = send("GET", "/api/v1/parent/children/" + mine + "/results", parent, null).body();
+        assertThat(list).contains("Term 1").contains("\"grade\":\"A\"").contains("\"result\":\"PASS\"");
+        String card = send("GET", "/api/v1/parent/children/" + mine + "/results/" + s.examId(), parent, null).body();
+        assertThat(card).contains("\"percent\":80.00").contains("English").contains("Mathematics");
+
+        assertThat(send("GET", "/api/v1/parent/children/" + other + "/results", parent, null).statusCode()).as("not their child").isEqualTo(404);
+        assertThat(send("GET", "/api/v1/exams?classId=" + s.classId(), parent, null).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/subjects", parent, null).statusCode()).isEqualTo(403);
+        assertThat(send("PUT", path + "/marks", parent, marksBody(mine, s.maths(), "100")).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/parent/children/" + mine + "/results", teacher(tenantA), null).statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void examsStayWithinTheirSchool() throws Exception {
+        ExamSetup s = examSetup(tenantA);
+        String student = studentInSection(s.admin(), "E-1", s.sectionId());
+        String other = admin(tenantB);
+        String path = "/api/v1/exams/" + s.examId();
+
+        assertThat(send("GET", "/api/v1/subjects", other, null).body()).isEqualTo("[]");
+        assertThat(send("GET", "/api/v1/exams?classId=" + s.classId(), other, null).statusCode()).isEqualTo(404);
+        assertThat(send("GET", path, other, null).statusCode()).isEqualTo(404);
+        assertThat(send("PUT", path + "/marks", other, marksBody(student, s.maths(), "50")).statusCode()).isEqualTo(404);
+        assertThat(send("GET", path + "/report-card/" + student, other, null).statusCode()).isEqualTo(404);
+        assertThat(send("POST", path + "/publish", other, null).statusCode()).isEqualTo(404);
     }
 }

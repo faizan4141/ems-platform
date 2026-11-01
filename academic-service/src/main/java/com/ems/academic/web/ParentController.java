@@ -13,6 +13,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
+import com.ems.academic.dto.ExamDtos.ChildExam;
+import com.ems.academic.dto.ExamDtos.ReportCard;
+import com.ems.academic.service.ReportCardService;
 
 import java.util.List;
 import java.util.UUID;
@@ -24,11 +27,13 @@ public class ParentController {
     private final ParentService service;
     private final FeeLedgerService feeLedger;
     private final OnlinePaymentService online;
+    private final ReportCardService reports;
 
-    public ParentController(ParentService service, FeeLedgerService feeLedger, OnlinePaymentService online) {
+    public ParentController(ParentService service, FeeLedgerService feeLedger, OnlinePaymentService online, ReportCardService reports) {
         this.service = service;
         this.feeLedger = feeLedger;
         this.online = online;
+        this.reports = reports;
     }
 
     @GetMapping("/children")
@@ -58,5 +63,15 @@ public class ParentController {
     @GetMapping("/payment-attempts/{attemptId}")
     public AttemptView attempt(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID attemptId) {
         return online.status(TenantClaims.requireTenantId(jwt), jwt.getSubject(), attemptId);
+    }
+
+    @GetMapping("/children/{studentId}/results")
+    public List<ChildExam> results(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID studentId) {
+        return reports.forParentList(TenantClaims.requireTenantId(jwt), jwt.getSubject(), studentId);
+    }
+
+    @GetMapping("/children/{studentId}/results/{examId}")
+    public ReportCard result(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID studentId, @PathVariable UUID examId) {
+        return reports.forParent(TenantClaims.requireTenantId(jwt), jwt.getSubject(), studentId, examId);
     }
 }

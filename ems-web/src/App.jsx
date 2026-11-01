@@ -21,6 +21,10 @@ import FeeSetupPage from './pages/FeeSetupPage';
 import StudentFeesPage from './pages/StudentFeesPage';
 import OnlinePaymentsPage from './pages/OnlinePaymentsPage';
 import SimulatedCheckoutPage from './pages/SimulatedCheckoutPage';
+import ExamsPage from './pages/ExamsPage';
+import ExamSetupPage from './pages/ExamSetupPage';
+import ExamDetailPage from './pages/ExamDetailPage';
+import ReportCardPage from './pages/ReportCardPage';
 
 function AuthGate({ children }) {
   const dispatch = useDispatch();
@@ -66,6 +70,10 @@ export default function App() {
           <Route path="fees/students/:id" element={<RequireRole roles={['TENANT_ADMIN']}><StudentFeesPage /></RequireRole>} />
           <Route path="fees/online" element={<RequireRole roles={['TENANT_ADMIN']}><OnlinePaymentsPage /></RequireRole>} />
           <Route path="pay/simulated/:providerRef" element={<RequireRole roles={['PARENT']}><SimulatedCheckoutPage /></RequireRole>} />
+          <Route path="exams" element={<RequireRole roles={['TENANT_ADMIN', 'TEACHER']}><ExamsPage /></RequireRole>} />
+          <Route path="exams/setup" element={<RequireRole roles={['TENANT_ADMIN']}><ExamSetupPage /></RequireRole>} />
+          <Route path="exams/:id" element={<RequireRole roles={['TENANT_ADMIN', 'TEACHER']}><ExamDetailPage /></RequireRole>} />
+          <Route path="exams/:examId/report/:studentId" element={<RequireRole roles={['TENANT_ADMIN', 'TEACHER']}><ReportCardPage /></RequireRole>} />
         </Route>
       </Routes>
     </AuthGate>

@@ -17,6 +17,9 @@ import { api } from '../services/api';
 import { useGetAttemptQuery, useStartPaymentMutation } from '../services/feesApi';
 import { newKey } from '../app/fees';
 import { payableCharges, returnMessage, safeRedirectUrl, selectedTotal } from '../app/onlinePay';
+import { useListChildResultsQuery } from '../services/examsApi';
+import { RESULT, fmt } from '../app/exams';
+import ReportCardDialog from '../components/ReportCardDialog';
 
 function PaymentBanner() {
   const dispatch = useDispatch();
@@ -106,6 +109,31 @@ function FeesCard({ studentId }) {
   );
 }
 
+function ResultsCard({ studentId }) {
+  const { data: exams = [] } = useListChildResultsQuery(studentId);
+  const [openId, setOpenId] = useState(null);
+  if (exams.length === 0) return null;   // nothing has been published yet
+
+  return (
+    <section className="card">
+      <h2>Results</h2>
+      <ul className="checklist">
+        {exams.map((e) => (
+          <li key={e.examId}>
+            <span><strong>{e.name}</strong> <span className="muted">· {fmt(e.percent)}%</span></span>
+            <span className="row-actions">
+              {e.grade && <Chip tone="info">{e.grade}</Chip>}
+              <Chip tone={RESULT[e.result].tone}>{RESULT[e.result].label}</Chip>
+              <button className="btn btn-secondary" onClick={() => setOpenId(e.examId)}>Report card</button>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <ReportCardDialog studentId={studentId} examId={openId} onClose={() => setOpenId(null)} />
+    </section>
+  );
+}
+
 function ChildToday({ studentId }) {
   const { data, error } = useGetChildTodayQuery(studentId);
   if (error) return <ErrorNotice error={error} />;
@@ -148,6 +176,7 @@ function ChildToday({ studentId }) {
           </ul>
         )}
       </section>
+      <ResultsCard studentId={studentId} />
       <FeesCard studentId={studentId} />
     </>
   );
