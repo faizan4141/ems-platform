@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -34,4 +35,6 @@ public interface StudentRepository extends JpaRepository<Student, UUID>, JpaSpec
             + "and s.status = com.ems.academic.domain.StudentStatus.ACTIVE "
             + "order by s.firstName, s.lastName")
     List<Student> findChildren(@Param("keycloakId") UUID keycloakId, @Param("tenantId") UUID tenantId);
+
+    List<Student> findByTenantIdAndSectionIdInAndStatus(UUID tenantId, Collection<UUID> sectionIds, StudentStatus status);
 }

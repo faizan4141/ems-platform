@@ -29,6 +29,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/notices").hasAnyRole("TENANT_ADMIN", "TEACHER", "PARENT")
                         .requestMatchers(HttpMethod.POST, "/api/v1/notices").hasRole("TENANT_ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/notices/*").hasRole("TENANT_ADMIN")
+                        .requestMatchers("/api/v1/fees/**").hasRole("TENANT_ADMIN")
                         // school administration
                         .requestMatchers(HttpMethod.PUT, "/api/v1/school/profile", "/api/v1/academic-years/*/current",
                                 "/api/v1/students/*", "/api/v1/students/*/guardians").hasRole("TENANT_ADMIN")

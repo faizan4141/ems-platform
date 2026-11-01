@@ -80,7 +80,12 @@ export default function StudentDetailPage() {
       <Link to="/students" className="btn-link">← Students</Link>
       <div style={{ height: 12 }} />
       <PageHeader title={fullName(student)} subtitle={`Admission no. ${student.admissionNo}`}
-        action={<Chip tone={statusTone[student.status]}>{student.status}</Chip>} />
+        action={(
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <Chip tone={statusTone[student.status]}>{student.status}</Chip>
+            {canManage && <Link className="btn btn-secondary" to={`/fees/students/${student.id}`}>View fees</Link>}
+          </div>
+        )} />
 
       <section className="card">
         <h2>Details</h2>

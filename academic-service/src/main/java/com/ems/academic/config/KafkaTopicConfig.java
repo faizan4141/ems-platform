@@ -7,6 +7,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.TopicBuilder;
+import com.ems.academic.event.FeeEventPublisher;
 
 import java.time.Duration;
 
@@ -20,6 +21,15 @@ class KafkaTopicConfig {
                 .partitions(3)
                 .replicas(1)
                 // the events carry guardian contact details, so keep them briefly
+                .config(TopicConfig.RETENTION_MS_CONFIG, String.valueOf(Duration.ofDays(3).toMillis()))
+                .build();
+    }
+
+    @Bean
+    NewTopic feeEventsTopic() {
+        return TopicBuilder.name(FeeEventPublisher.TOPIC)
+                .partitions(3)
+                .replicas(1)
                 .config(TopicConfig.RETENTION_MS_CONFIG, String.valueOf(Duration.ofDays(3).toMillis()))
                 .build();
     }

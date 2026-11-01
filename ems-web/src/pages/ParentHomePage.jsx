@@ -6,6 +6,34 @@ import { useListNoticesQuery } from '../services/noticesApi';
 import { STATUS_LABEL, STATUS_TONE } from '../app/attendance';
 import { percentTone, shortDate, todayView } from '../app/parent';
 import { Chip, EmptyState, ErrorNotice, PageHeader } from '../components/ui';
+import { useGetChildFeesQuery } from '../services/feesApi';
+import { formatMoney } from '../app/fees';
+import { ChargesTable, PaymentsList } from '../components/LedgerTables';
+import Receipt from '../components/Receipt';
+
+function FeesCard({ studentId }) {
+  const { data: ledger, error } = useGetChildFeesQuery(studentId);
+  const [receipt, setReceipt] = useState(null);
+
+  if (error) return <ErrorNotice error={error} />;
+  if (!ledger || ledger.charges.length === 0) return null;   // the school has not billed anything yet
+
+  return (
+    <section className="card">
+      <div className="page-header" style={{ marginBottom: 12 }}>
+        <h2 style={{ margin: 0 }}>Fees</h2>
+        <Chip tone={ledger.balance > 0 ? 'warn' : 'ok'}>
+          {ledger.balance > 0 ? `${formatMoney(ledger.balance, ledger.currency)} to pay` : 'All paid'}
+        </Chip>
+      </div>
+      <ChargesTable ledger={ledger} />
+      <h2 style={{ marginTop: 20 }}>Payments</h2>
+      <PaymentsList ledger={ledger} onReceipt={setReceipt} />
+      <p className="muted" style={{ marginBottom: 0 }}>To pay a fee, please contact the school office. Online payment is coming soon.</p>
+      <Receipt ledger={ledger} payment={receipt} onClose={() => setReceipt(null)} />
+    </section>
+  );
+}
 
 function ChildToday({ studentId }) {
   const { data, error } = useGetChildTodayQuery(studentId);
@@ -49,6 +77,7 @@ function ChildToday({ studentId }) {
           </ul>
         )}
       </section>
+      <FeesCard studentId={studentId} />
     </>
   );
 }

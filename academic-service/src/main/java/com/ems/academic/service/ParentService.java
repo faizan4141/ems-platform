@@ -53,8 +53,7 @@ public class ParentService {
     public ChildToday today(UUID tenantId, String subject, UUID studentId) {
         guard.requireActive(tenantId);
         // Only the parent's own children are visible; anything else looks like it does not exist.
-        Student child = linked(tenantId, subject).stream().filter(s -> studentId.equals(s.getId())).findFirst()
-                .orElseThrow(() -> new ResourceNotFoundException("Child not found"));
+        Student child = requireChild(tenantId, subject, studentId);
 
         LocalDate today = LocalDate.now(clock);
         List<AttendanceDay> days = records.findDays(child.getId(), today.minusDays(WINDOW_DAYS));
@@ -66,6 +65,13 @@ public class ParentService {
                 studentService.placements(sectionId == null ? Set.of() : Set.of(sectionId)), sectionId);
         return new ChildToday(child.getId(), name(child), p == null ? null : p[0], p == null ? null : p[1],
                 todayStatus, percent(days), days.stream().limit(RECENT_DAYS).toList());
+    }
+
+    @Transactional(readOnly = true)
+    public Student requireChild(UUID tenantId, String subject, UUID studentId) {
+        guard.requireActive(tenantId);
+        return linked(tenantId, subject).stream().filter(s -> studentId.equals(s.getId())).findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Child not found"));
     }
 
     /** Late counts as attending. Null when nothing has been recorded. */

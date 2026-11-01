@@ -19,6 +19,7 @@ import com.ems.academic.event.AttendanceRecorded;
 import org.springframework.context.event.EventListener;
 import com.ems.academic.domain.GuardianLogin;
 import com.ems.academic.repository.GuardianLoginRepository;
+import com.ems.academic.event.FeeReminderEvent;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -40,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"spring.kafka.listener.auto-startup=false", "ems.kafka.publish=false"})
+        properties = {"spring.kafka.listener.auto-startup=false", "ems.kafka.publish=false", "ems.scheduling.enabled=false"})
 class AcademicApiIntegrationTest {
 
     @Container
@@ -52,9 +53,13 @@ class AcademicApiIntegrationTest {
     static class TestJwtConfig {
         static class EventCollector {
             final List<AttendanceRecorded> events = new CopyOnWriteArrayList<>();
+            final List<FeeReminderEvent> feeEvents = new CopyOnWriteArrayList<>();
 
             @EventListener
             void on(AttendanceRecorded event) { events.add(event); }
+
+            @EventListener
+            void on(FeeReminderEvent event) { feeEvents.add(event); }
         }
 
         @Bean
@@ -191,6 +196,25 @@ class AcademicApiIntegrationTest {
 
     private static String notice(String title, String audience) {
         return "{\"title\":\"" + title + "\",\"body\":\"Details\",\"audience\":\"" + audience + "\"}";
+    }
+
+    private String[] classAndSection(String token) throws Exception {
+        String yearId = idOf(send("POST", "/api/v1/academic-years", token, year("2026-27", "2026-04-01", "2027-03-31")).body());
+        String body = "{\"academicYearId\":\"" + yearId + "\",\"name\":\"Class 8\",\"gradeLevel\":8,\"sections\":[\"A\"]}";
+        String created = send("POST", "/api/v1/classes", token, body).body();
+        return new String[]{nthId(created, 0), nthId(created, 1)};   // class id, then section A's id
+    }
+
+    private static String feeItem(String classId, String name, String amount, LocalDate due) {
+        return "{\"classId\":\"" + classId + "\",\"name\":\"" + name + "\",\"amount\":\"" + amount + "\",\"dueDate\":\"" + due + "\"}";
+    }
+
+    private static String payment(String amount, String key) {
+        return "{\"amount\":\"" + amount + "\",\"method\":\"CASH\",\"idempotencyKey\":\"" + key + "\"}";
+    }
+
+    private String ledger(String token, String studentId) throws Exception {
+        return send("GET", "/api/v1/fees/students/" + studentId, token, null).body();
     }
 
     @Test
@@ -507,5 +531,128 @@ class AcademicApiIntegrationTest {
         assertThat(send("DELETE", "/api/v1/notices/" + staffNotice, token, null).statusCode()).isEqualTo(204);
         assertThat(send("GET", "/api/v1/notices", teacher(tenantA), null).body()).doesNotContain("Staff meeting");
         assertThat(send("GET", "/api/v1/notices", admin(tenantB), null).body()).isEqualTo("[]");
+    }
+
+    @Test
+    void feeLifecycle_generate_pay_receipt_void() throws Exception {
+        String token = admin(tenantA);
+        String[] cs = classAndSection(token);
+        String student = studentInSection(token, "F-1", cs[1]);
+        studentInSection(token, "F-2", cs[1]);
+        LocalDate due = LocalDate.now(clock).plusDays(10);
+        String generatePath = "/api/v1/fees/classes/" + cs[0] + "/generate";
+
+        assertThat(send("POST", generatePath, token, null).statusCode()).as("no fees defined yet").isEqualTo(400);
+        assertThat(send("POST", "/api/v1/fees/items", token, feeItem(cs[0], "Tuition", "12000.00", due)).statusCode()).isEqualTo(201);
+        assertThat(send("POST", "/api/v1/fees/items", token, feeItem(cs[0], "tuition", "1.00", due)).statusCode())
+                .as("fee names are unique per class, ignoring case").isEqualTo(409);
+
+        assertThat(send("POST", generatePath, token, null).body()).contains("\"created\":2");
+        assertThat(send("POST", generatePath, token, null).body()).as("generating again adds nothing").contains("\"created\":0");
+
+        String before = ledger(token, student);
+        assertThat(before).contains("\"balance\":12000.00").contains("\"status\":\"DUE\"");
+        String chargeId = idOf(before);
+
+        String key1 = UUID.randomUUID().toString();
+        HttpResponse<String> first = send("POST", "/api/v1/fees/charges/" + chargeId + "/payments", token, payment("5000.00", key1));
+        assertThat(first.statusCode()).isEqualTo(201);
+        assertThat(first.body()).contains("RCP-000001");
+        assertThat(send("POST", "/api/v1/fees/charges/" + chargeId + "/payments", token, payment("5000.00", key1)).body())
+                .as("a retry with the same key returns the same receipt").contains("RCP-000001");
+        assertThat(ledger(token, student)).contains("\"paid\":5000.00").contains("\"balance\":7000.00").contains("\"status\":\"PARTIAL\"");
+
+        assertThat(send("POST", "/api/v1/fees/charges/" + chargeId + "/payments", token,
+                payment("7000.01", UUID.randomUUID().toString())).statusCode()).as("cannot overpay").isEqualTo(400);
+
+        HttpResponse<String> second = send("POST", "/api/v1/fees/charges/" + chargeId + "/payments", token,
+                payment("7000.00", UUID.randomUUID().toString()));
+        assertThat(second.body()).contains("RCP-000002");
+        assertThat(ledger(token, student)).contains("\"status\":\"PAID\"");
+
+        String paymentId = idOf(first.body());
+        assertThat(send("POST", "/api/v1/fees/payments/" + paymentId + "/void", token, "{\"reason\":\"Entered by mistake\"}").body())
+                .contains("\"voided\":true").contains("RCP-000001");
+        assertThat(send("POST", "/api/v1/fees/payments/" + paymentId + "/void", token, "{\"reason\":\"again\"}").statusCode())
+                .isEqualTo(409);
+        assertThat(ledger(token, student)).contains("\"balance\":5000.00").contains("\"status\":\"PARTIAL\"");
+    }
+
+    @Test
+    void validatesPayments() throws Exception {
+        String token = admin(tenantA);
+        String[] cs = classAndSection(token);
+        String student = studentInSection(token, "F-1", cs[1]);
+        send("POST", "/api/v1/fees/items", token, feeItem(cs[0], "Tuition", "100.00", LocalDate.now(clock).plusDays(5)));
+        send("POST", "/api/v1/fees/classes/" + cs[0] + "/generate", token, null);
+        String chargeId = idOf(ledger(token, student));
+        String path = "/api/v1/fees/charges/" + chargeId + "/payments";
+
+        String upiWithoutReference = "{\"amount\":\"10.00\",\"method\":\"UPI\",\"idempotencyKey\":\"" + UUID.randomUUID() + "\"}";
+        assertThat(send("POST", path, token, upiWithoutReference).statusCode()).isEqualTo(400);
+        String future = "{\"amount\":\"10.00\",\"method\":\"CASH\",\"paidOn\":\"" + LocalDate.now(clock).plusDays(1)
+                + "\",\"idempotencyKey\":\"" + UUID.randomUUID() + "\"}";
+        assertThat(send("POST", path, token, future).statusCode()).isEqualTo(400);
+        assertThat(send("POST", path, token, payment("0.00", UUID.randomUUID().toString())).statusCode()).isEqualTo(400);
+    }
+
+    @Test
+    void duesSummaryAndReminders() throws Exception {
+        String token = admin(tenantA);
+        String[] cs = classAndSection(token);
+        String paying = studentInSection(token, "F-1", cs[1]);
+        studentInSection(token, "F-2", cs[1]);
+        send("POST", "/api/v1/fees/items", token, feeItem(cs[0], "Term 1", "10000.00", LocalDate.now(clock).minusDays(1)));
+        send("POST", "/api/v1/fees/classes/" + cs[0] + "/generate", token, null);
+
+        String summary = send("GET", "/api/v1/fees/summary", token, null).body();
+        assertThat(summary).contains("\"billed\":20000.00").contains("\"outstanding\":20000.00")
+                .contains("\"overdue\":20000.00").contains("\"studentsWithOverdue\":2");
+        assertThat(send("GET", "/api/v1/fees/dues?classId=" + cs[0], token, null).body()).contains("F-1").contains("F-2");
+
+        String chargeId = idOf(ledger(token, paying));
+        send("POST", "/api/v1/fees/charges/" + chargeId + "/payments", token, payment("10000.00", UUID.randomUUID().toString()));
+
+        assertThat(send("GET", "/api/v1/fees/dues", token, null).body()).doesNotContain("F-1").contains("F-2");
+        assertThat(send("GET", "/api/v1/fees/summary", token, null).body())
+                .contains("\"collected\":10000.00").contains("\"overdue\":10000.00").contains("\"studentsWithOverdue\":1");
+
+        int before = collector.feeEvents.size();
+        assertThat(send("POST", "/api/v1/fees/reminders/run", token, null).body()).contains("\"reminded\":1");
+        FeeReminderEvent reminder = collector.feeEvents.get(before);
+        assertThat(reminder.overdue()).isTrue();
+        assertThat(reminder.totalDue()).isEqualByComparingTo("10000");
+        assertThat(reminder.guardianPhone()).isEqualTo("+919876543210");
+        assertThat(send("POST", "/api/v1/fees/reminders/run", token, null).body())
+                .as("not reminded again within the interval").contains("\"reminded\":0");
+    }
+
+    @Test
+    void feesAreAdminOnly_parentsSeeOnlyTheirOwnChild_andSchoolsStayApart() throws Exception {
+        String token = admin(tenantA);
+        String[] cs = classAndSection(token);
+        String mine = idOf(send("POST", "/api/v1/students", token,
+                studentJson("F-1", cs[1], guardianWithEmail("raj@example.com"))).body());
+        String other = idOf(send("POST", "/api/v1/students", token,
+                studentJson("F-2", cs[1], guardianWithEmail("someone@example.com"))).body());
+        send("POST", "/api/v1/fees/items", token, feeItem(cs[0], "Tuition", "100.00", LocalDate.now(clock).plusDays(5)));
+        send("POST", "/api/v1/fees/classes/" + cs[0] + "/generate", token, null);
+        String chargeId = idOf(ledger(token, mine));
+        UUID parentSub = UUID.randomUUID();
+        logins.save(new GuardianLogin(parentSub, tenantA, "raj@example.com"));
+
+        assertThat(send("GET", "/api/v1/fees/summary", teacher(tenantA), null).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/fees/summary", parent(tenantA, parentSub), null).statusCode()).isEqualTo(403);
+        assertThat(send("POST", "/api/v1/fees/charges/" + chargeId + "/payments", parent(tenantA, parentSub),
+                payment("10.00", UUID.randomUUID().toString())).statusCode()).isEqualTo(403);
+
+        assertThat(send("GET", "/api/v1/parent/children/" + mine + "/fees", parent(tenantA, parentSub), null).body())
+                .contains("Tuition").contains("\"balance\":100.00");
+        assertThat(send("GET", "/api/v1/parent/children/" + other + "/fees", parent(tenantA, parentSub), null).statusCode())
+                .isEqualTo(404);
+
+        assertThat(send("POST", "/api/v1/fees/charges/" + chargeId + "/payments", admin(tenantB),
+                payment("10.00", UUID.randomUUID().toString())).statusCode()).isEqualTo(404);
+        assertThat(send("GET", "/api/v1/fees/students/" + mine, admin(tenantB), null).statusCode()).isEqualTo(404);
     }
 }

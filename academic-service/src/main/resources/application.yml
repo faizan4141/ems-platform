@@ -51,6 +51,10 @@ spring:
       
 ems:
   timezone: Asia/Kolkata
+  fees:
+    currency: INR
+    due-soon-days: 3
+    reminder-interval-days: 7
 
 management:
   endpoints:

@@ -12,7 +12,7 @@ export const NAV = [
   { to: '/setup', label: 'School setup', icon: Settings, roles: ['TENANT_ADMIN'] },
   { to: '/attendance', label: 'Attendance', icon: ClipboardCheck, roles: TENANT },
   { to: '/notices', label: 'Notices', icon: Bell, roles: [...TENANT, ...PARENT] },
-  { label: 'Fees', icon: Wallet, roles: ['TENANT_ADMIN'], soon: true },
+  { to: '/fees', label: 'Fees', icon: Wallet, roles: ['TENANT_ADMIN'] },
   { label: 'Network hub', icon: Share2, roles: TENANT, soon: true },
 ];
 

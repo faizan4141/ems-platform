@@ -74,3 +74,10 @@ a.nav-item:hover { background: var(--bg); color: var(--text); }
 .notice h3 { margin: 0 0 4px; font-size: 1rem; }
 .notice p { margin: 6px 0 0; white-space: pre-wrap; }
 .notice-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.receipt dl { margin: 12px 0 0; }
+@media print {
+  body * { visibility: hidden; }
+  .receipt, .receipt * { visibility: visible; }
+  .receipt { position: absolute; inset: 0; width: 100%; max-width: none; border: 0; box-shadow: none; }
+  .receipt .dialog-actions { display: none; }
+}
