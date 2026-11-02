@@ -1,4 +1,4 @@
-import { LayoutDashboard, School, Users, ClipboardCheck, Wallet, Share2, Settings, GraduationCap, CalendarCheck, Bell, Award } from 'lucide-react';
+import { LayoutDashboard, School, Users, ClipboardCheck, Wallet, Share2, Settings, GraduationCap, CalendarCheck, Bell, Award, UserCog } from 'lucide-react';
 
 const TENANT = ['TENANT_ADMIN', 'TEACHER'];
 const PARENT = ['PARENT'];
@@ -8,7 +8,8 @@ export const NAV = [
   { to: '/parent', label: 'Today', icon: CalendarCheck, roles: PARENT },
   { to: '/tenants', label: 'Schools', icon: School, roles: ['PLATFORM_ADMIN'] },
   { to: '/students', label: 'Students', icon: GraduationCap, roles: TENANT },
-  { to: '/users', label: 'People', icon: Users, roles: TENANT },
+  { to: '/users', label: 'People', icon: Users, roles: ['TENANT_ADMIN'] },
+  { to: '/staff', label: 'Staff', icon: UserCog, roles: ['TENANT_ADMIN'] },
   { to: '/setup', label: 'School setup', icon: Settings, roles: ['TENANT_ADMIN'] },
   { to: '/attendance', label: 'Attendance', icon: ClipboardCheck, roles: TENANT },
   { to: '/exams', label: 'Exams', icon: Award, roles: TENANT },

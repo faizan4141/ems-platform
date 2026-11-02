@@ -4,8 +4,10 @@ import com.ems.academic.domain.*;
 import com.ems.academic.dto.*;
 import com.ems.academic.exception.DuplicateResourceException;
 import com.ems.academic.exception.InvalidRequestException;
+import com.ems.academic.exception.OperationNotAllowedException;
 import com.ems.academic.exception.ResourceNotFoundException;
 import com.ems.academic.repository.*;
+import com.ems.academic.security.Caller;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -26,22 +28,44 @@ public class StudentService {
     private final ClassRepository classes;
     private final TenantGuard guard;
     private final GuardianLoginRepository logins;
+    private final AccessService access;
 
     public StudentService(StudentRepository students, GuardianRepository guardians, SectionRepository sections,
-                          ClassRepository classes, TenantGuard guard, GuardianLoginRepository logins) {
+                          ClassRepository classes, TenantGuard guard, GuardianLoginRepository logins, AccessService access) {
         this.students = students;
         this.guardians = guardians;
         this.sections = sections;
         this.classes = classes;
         this.guard = guard;
         this.logins = logins;
+        this.access = access;
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<StudentSummary> list(UUID tenantId, UUID sectionId, boolean unassigned,
+    public PageResponse<StudentSummary> list(Caller caller, UUID sectionId, boolean unassigned,
                                              String search, int page, int size) {
+        UUID tenantId = caller.tenantId();
         guard.requireActive(tenantId);
+        AccessService.Scope scope = access.scope(caller);
+        int pageNo = Math.max(page, 0);
+        int pageSize = Math.min(Math.max(size, 1), 100);
+
         Specification<Student> spec = (root, query, cb) -> cb.equal(root.get("tenantId"), tenantId);
+        if (!scope.admin()) {
+            if (unassigned) {
+                throw new OperationNotAllowedException("Only school admins can list students without a section");
+            }
+            if (sectionId != null && !scope.canSeeSection(sectionId)) {
+                throw new OperationNotAllowedException("You are not assigned to this section");
+            }
+            if (scope.sections().isEmpty()) {
+                return new PageResponse<>(List.of(), pageNo, pageSize, 0, 0);
+            }
+            if (sectionId == null) {
+                Set<UUID> mine = scope.sections();
+                spec = spec.and((root, query, cb) -> root.get("sectionId").in(mine));   // only their own sections
+            }
+        }
         if (sectionId != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("sectionId"), sectionId));
         } else if (unassigned) {
@@ -56,9 +80,7 @@ public class StudentService {
                     cb.like(cb.lower(cb.concat(cb.concat(root.<String>get("firstName"), " "),
                             root.<String>get("lastName"))), pattern, '\\')));
         }
-        PageRequest pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100),
-                Sort.by("lastName", "firstName"));
-        Page<Student> result = students.findAll(spec, pageable);
+        Page<Student> result = students.findAll(spec, PageRequest.of(pageNo, pageSize, Sort.by("lastName", "firstName")));
 
         Map<UUID, String[]> placement = placements(result.getContent().stream()
                 .map(Student::getSectionId).filter(Objects::nonNull).collect(Collectors.toSet()));
@@ -69,9 +91,15 @@ public class StudentService {
     }
 
     @Transactional(readOnly = true)
-    public StudentDetail get(UUID tenantId, UUID id) {
+    public StudentDetail get(Caller caller, UUID id) {
+        UUID tenantId = caller.tenantId();
         guard.requireActive(tenantId);
-        return detail(require(tenantId, id), null);
+        Student student = require(tenantId, id);
+        // A student outside the teacher's sections looks like it does not exist.
+        if (!access.scope(caller).canSeeSection(student.getSectionId())) {
+            throw new ResourceNotFoundException("Student not found");
+        }
+        return detail(student, null);
     }
 
     @Transactional

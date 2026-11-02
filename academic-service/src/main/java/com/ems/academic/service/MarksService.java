@@ -3,10 +3,12 @@ package com.ems.academic.service;
 import com.ems.academic.domain.*;
 import com.ems.academic.dto.ExamDtos.*;
 import com.ems.academic.exception.InvalidRequestException;
+import com.ems.academic.exception.OperationNotAllowedException;
 import com.ems.academic.exception.ResourceNotFoundException;
 import com.ems.academic.repository.ExamAuditRepository;
 import com.ems.academic.repository.ExamMarkRepository;
 import com.ems.academic.repository.ExamRepository;
+import com.ems.academic.security.Caller;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,43 +27,57 @@ public class MarksService {
     private final ExamData examData;
     private final ExamService examService;
     private final GradingService grading;
+    private final AccessService access;
     private final TenantGuard guard;
     private final Clock clock;
 
     public MarksService(ExamRepository exams, ExamMarkRepository examMarks, ExamAuditRepository audits,
-                        ExamData examData, ExamService examService, GradingService grading, TenantGuard guard, Clock clock) {
+                        ExamData examData, ExamService examService, GradingService grading, AccessService access,
+                        TenantGuard guard, Clock clock) {
         this.exams = exams;
         this.examMarks = examMarks;
         this.audits = audits;
         this.examData = examData;
         this.examService = examService;
         this.grading = grading;
+        this.access = access;
         this.guard = guard;
         this.clock = clock;
     }
 
     @Transactional(readOnly = true)
-    public MarksGrid grid(UUID tenantId, UUID examId, UUID sectionId) {
+    public MarksGrid grid(Caller caller, UUID examId, UUID sectionId) {
+        UUID tenantId = caller.tenantId();
         guard.requireActive(tenantId);
         Exam exam = examService.require(tenantId, examId);
+        AccessService.Scope scope = access.scope(caller);
+        requireSection(scope, sectionId);
         ExamData.Loaded data = examData.load(examId);
         Map<UUID, Map<UUID, ExamMark>> byStudent = marksByStudent(data);
-        List<GridRow> rows = examData.roster(tenantId, exam.getClassId(), sectionId).stream().map(s -> {
+
+        List<GridRow> rows = examData.roster(tenantId, exam.getClassId(), sectionId, allowed(scope)).stream().map(s -> {
             Map<UUID, GridCell> cells = new LinkedHashMap<>();
             byStudent.getOrDefault(s.getId(), Map.of()).forEach((subjectId, m) -> cells.put(subjectId, new GridCell(m.getMarks(), m.isAbsent())));
-            return new GridRow(s.getId(), s.getFirstName() + " " + s.getLastName(), s.getAdmissionNo(), cells);
+            List<UUID> editable = data.examSubjects().stream()
+                    .filter(es -> scope.canEditMarks(s.getSectionId(), es.getSubjectId()))
+                    .map(ExamSubject::getId).toList();
+            return new GridRow(s.getId(), s.getFirstName() + " " + s.getLastName(), s.getAdmissionNo(), cells, editable);
         }).toList();
         return new MarksGrid(examService.view(exam), rows);
     }
 
     @Transactional(readOnly = true)
-    public ClassResults results(UUID tenantId, UUID examId, UUID sectionId) {
+    public ClassResults results(Caller caller, UUID examId, UUID sectionId) {
+        UUID tenantId = caller.tenantId();
         guard.requireActive(tenantId);
         Exam exam = examService.require(tenantId, examId);
+        AccessService.Scope scope = access.scope(caller);
+        requireSection(scope, sectionId);
         ExamData.Loaded data = examData.load(examId);
         List<GradeScale.Band> bands = grading.bandsFor(tenantId);
         Map<UUID, Map<UUID, ExamMark>> byStudent = marksByStudent(data);
-        List<ResultRow> rows = examData.roster(tenantId, exam.getClassId(), sectionId).stream().map(s -> {
+
+        List<ResultRow> rows = examData.roster(tenantId, exam.getClassId(), sectionId, allowed(scope)).stream().map(s -> {
             Map<UUID, ReportCardCalculator.Entry> entries = new HashMap<>();
             byStudent.getOrDefault(s.getId(), Map.of()).forEach((subjectId, m) ->
                     entries.put(subjectId, new ReportCardCalculator.Entry(m.getMarks(), m.isAbsent())));
@@ -73,15 +89,18 @@ public class MarksService {
     }
 
     @Transactional
-    public MarksSaveResponse save(UUID tenantId, UUID examId, MarksRequest req, String actor) {
+    public MarksSaveResponse save(Caller caller, UUID examId, MarksRequest req) {
+        UUID tenantId = caller.tenantId();
+        String actor = caller.name();
         guard.requireActive(tenantId);
         Exam exam = exams.lockByIdAndTenantId(examId, tenantId).orElseThrow(() -> new ResourceNotFoundException("Exam not found"));
         if (exam.getStatus() != ExamStatus.DRAFT) {
             throw new InvalidRequestException("Results are published. Ask a school admin to reopen the exam before changing marks");
         }
+        AccessService.Scope scope = access.scope(caller);
         ExamData.Loaded data = examData.load(examId);
         Map<UUID, ExamSubject> subjectById = data.examSubjects().stream().collect(Collectors.toMap(ExamSubject::getId, s -> s));
-        Map<UUID, Student> roster = examData.roster(tenantId, exam.getClassId(), null).stream()
+        Map<UUID, Student> roster = examData.roster(tenantId, exam.getClassId(), null, null).stream()
                 .collect(Collectors.toMap(Student::getId, s -> s));
         Map<String, ExamMark> existing = subjectById.isEmpty() ? Map.of()
                 : examMarks.findByExamSubjectIdIn(subjectById.keySet()).stream()
@@ -97,6 +116,10 @@ public class MarksService {
             Student student = roster.get(entry.studentId());
             if (subject == null) throw new InvalidRequestException("A subject in the request is not part of this exam");
             if (student == null) throw new InvalidRequestException("A student in the request is not in this class");
+            // The whole request fails if any single mark is outside what the teacher is allowed to enter.
+            if (!scope.canEditMarks(student.getSectionId(), subject.getSubjectId())) {
+                throw new OperationNotAllowedException("You can only enter marks for the subjects you teach in your own sections");
+            }
             String k = key(subject.getId(), student.getId());
             if (!seen.add(k)) throw new InvalidRequestException("The same student and subject appear twice in the request");
 
@@ -124,6 +147,14 @@ public class MarksService {
         audits.saveAll(trail);
         return new MarksSaveResponse(req.entries().size(), changed);
     }
+
+    private static void requireSection(AccessService.Scope scope, UUID sectionId) {
+        if (sectionId != null && !scope.canSeeSection(sectionId)) {
+            throw new OperationNotAllowedException("You are not assigned to this section");
+        }
+    }
+
+    private static Set<UUID> allowed(AccessService.Scope scope) { return scope.admin() ? null : scope.sections(); }
 
     private Map<UUID, Map<UUID, ExamMark>> marksByStudent(ExamData.Loaded data) {
         Set<UUID> ids = data.examSubjects().stream().map(ExamSubject::getId).collect(Collectors.toSet());

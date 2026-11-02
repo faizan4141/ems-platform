@@ -1,7 +1,10 @@
 package com.ems.academic;
 
 import com.ems.academic.domain.TenantSnapshot;
+import com.ems.academic.repository.StaffMemberRepository;
 import com.ems.academic.repository.TenantSnapshotRepository;
+import com.ems.academic.service.StaffLoginService;
+import com.ems.academic.domain.StaffMember;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +25,7 @@ import com.ems.academic.repository.GuardianLoginRepository;
 import com.ems.academic.event.FeeReminderEvent;
 import com.ems.academic.payment.WebhookEvent;
 import com.ems.academic.payment.WebhookSigner;
+import com.ems.academic.event.UserLoginEvent;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -98,10 +102,13 @@ class AcademicApiIntegrationTest {
     @Autowired TestJwtConfig.EventCollector collector;
     @Autowired Clock clock;
     @Autowired GuardianLoginRepository logins;
+    @Autowired StaffMemberRepository staff;
+    @Autowired StaffLoginService staffLogins;
 
     private final UUID tenantA = UUID.randomUUID();
     private final UUID tenantB = UUID.randomUUID();
     private final UUID suspended = UUID.randomUUID();
+    private final UUID teacherSub = UUID.randomUUID();
 
     @BeforeEach
     void seedTenants() {
@@ -117,7 +124,7 @@ class AcademicApiIntegrationTest {
     }
 
     private String admin(UUID tenant) { return "TENANT_ADMIN." + tenant; }
-    private String teacher(UUID tenant) { return "TEACHER." + tenant; }
+    private String teacher(UUID tenant) { return "TEACHER." + tenant + "." + teacherSub; }
 
     private HttpResponse<String> send(String method, String path, String token, String json) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
@@ -305,9 +312,9 @@ class AcademicApiIntegrationTest {
         return sb.append("]}").toString();
     }
 
-    private record ExamSetup(String admin, String classId, String sectionId, String examId, String english, String maths) {}
+    private record ExamSetup(String admin, String classId, String sectionId, String examId, String english, String maths,
+                             String englishSubject, String mathsSubject) {}
 
-    /** A class with Term 1 (English 50, pass 18; Mathematics 100, pass 35). Subjects sort alphabetically. */
     private ExamSetup examSetup(UUID tenant) throws Exception {
         String token = admin(tenant);
         String[] cs = classAndSection(token);
@@ -319,7 +326,32 @@ class AcademicApiIntegrationTest {
         HttpResponse<String> created = send("POST", "/api/v1/exams", token, body);
         assertThat(created.statusCode()).isEqualTo(201);
         List<String> examSubjects = valuesOf(created.body(), "examSubjectId");   // English first, then Mathematics
-        return new ExamSetup(token, cs[0], cs[1], idOf(created.body()), examSubjects.get(0), examSubjects.get(1));
+        return new ExamSetup(token, cs[0], cs[1], idOf(created.body()), examSubjects.get(0), examSubjects.get(1), eng, math);
+    }
+
+    /** Makes the test teacher a staff member of tenant A and returns their staff id. */
+    private UUID teacherStaffId() {
+        return staff.findByKeycloakId(teacherSub).orElseGet(() -> staff.save(new StaffMember(tenantA, teacherSub,
+                "teacher-" + teacherSub.toString().substring(0, 8) + "@example.com", "Test", "Teacher"))).getId();
+    }
+
+    private void assign(UUID staffId, String sectionId, String subjectId, boolean classTeacher, int expectedStatus) throws Exception {
+        String body = "{\"staffId\":\"" + staffId + "\",\"sectionId\":\"" + sectionId + "\","
+                + (subjectId == null ? "" : "\"subjectId\":\"" + subjectId + "\",") + "\"classTeacher\":" + classTeacher + "}";
+        assertThat(send("POST", "/api/v1/assignments", admin(tenantA), body).statusCode()).isEqualTo(expectedStatus);
+    }
+
+    private void classTeacherOf(String sectionId) throws Exception { assign(teacherStaffId(), sectionId, null, true, 201); }
+
+    private void teachesSubject(String sectionId, String subjectId) throws Exception {
+        assign(teacherStaffId(), sectionId, subjectId, false, 201);
+    }
+
+    private String[] classWithTwoSections(String token) throws Exception {
+        String yearId = idOf(send("POST", "/api/v1/academic-years", token, year("2026-27", "2026-04-01", "2027-03-31")).body());
+        String body = "{\"academicYearId\":\"" + yearId + "\",\"name\":\"Class 8\",\"gradeLevel\":8,\"sections\":[\"A\",\"B\"]}";
+        String created = send("POST", "/api/v1/classes", token, body).body();
+        return new String[]{nthId(created, 0), nthId(created, 1), nthId(created, 2)};   // class, section A, section B
     }
 
     @Test
@@ -420,6 +452,7 @@ class AcademicApiIntegrationTest {
     void createsAStudentWithGuardians_andFindsThemByFilterAndSearch() throws Exception {
         String token = admin(tenantA);
         String sectionA = classWithSections(token);
+        classTeacherOf(sectionA);
 
         HttpResponse<String> created = send("POST", "/api/v1/students", token, studentJson("A-1", sectionA, ONE_GUARDIAN));
         assertThat(created.statusCode()).isEqualTo(201);
@@ -453,7 +486,9 @@ class AcademicApiIntegrationTest {
 
     @Test
     void studentsAreIsolatedBetweenSchools_andOnlyAdminsCanWrite() throws Exception {
-        String studentId = idOf(send("POST", "/api/v1/students", admin(tenantA), studentJson("A-1", null, ONE_GUARDIAN)).body());
+        String section = classWithSections(admin(tenantA));
+        classTeacherOf(section);
+        String studentId = studentInSection(admin(tenantA), "A-1", section);
 
         assertThat(send("GET", "/api/v1/students", admin(tenantB), null).body()).contains("\"totalElements\":0");
         assertThat(send("GET", "/api/v1/students/" + studentId, admin(tenantB), null).statusCode()).isEqualTo(404);
@@ -512,6 +547,7 @@ class AcademicApiIntegrationTest {
     void takesAttendance_notifiesOnlyOnChanges_andShowsItInTheRoster() throws Exception {
         String token = admin(tenantA);
         String section = classWithSections(token);
+        classTeacherOf(section);
         String aarav = studentInSection(token, "A-1", section);
         studentInSection(token, "A-2", section);
         String path = "/api/v1/attendance/sections/" + section;
@@ -542,6 +578,7 @@ class AcademicApiIntegrationTest {
     void teachersCanOnlyEditToday_adminsCanCorrectThePast_futureIsRejected() throws Exception {
         String token = admin(tenantA);
         String section = classWithSections(token);
+        classTeacherOf(section);
         String student = studentInSection(token, "A-1", section);
         String path = "/api/v1/attendance/sections/" + section;
         LocalDate today = LocalDate.now(clock);
@@ -575,6 +612,7 @@ class AcademicApiIntegrationTest {
     void parentsSeeOnlyTheirOwnChildren() throws Exception {
         String token = admin(tenantA);
         String section = classWithSections(token);
+        classTeacherOf(section);
         String mine = idOf(send("POST", "/api/v1/students", token,
                 studentJson("P-1", section, guardianWithEmail("raj@example.com"))).body());
         String other = idOf(send("POST", "/api/v1/students", token,
@@ -899,6 +937,7 @@ class AcademicApiIntegrationTest {
     @Test
     void examLifecycle_enter_publish_lock_results_reopen_audit() throws Exception {
         ExamSetup s = examSetup(tenantA);
+        classTeacherOf(s.sectionId());
         String one = studentInSection(s.admin(), "E-1", s.sectionId());
         String two = studentInSection(s.admin(), "E-2", s.sectionId());
         String path = "/api/v1/exams/" + s.examId();
@@ -940,6 +979,7 @@ class AcademicApiIntegrationTest {
     @Test
     void marksAreValidatedStrictly_andCanBeClearedAgain() throws Exception {
         ExamSetup s = examSetup(tenantA);
+        classTeacherOf(s.sectionId());
         String student = studentInSection(s.admin(), "E-1", s.sectionId());
         String path = "/api/v1/exams/" + s.examId() + "/marks";
         String teacher = teacher(tenantA);
@@ -964,6 +1004,7 @@ class AcademicApiIntegrationTest {
     @Test
     void parentsSeeOnlyPublishedResultsOfTheirOwnChild() throws Exception {
         ExamSetup s = examSetup(tenantA);
+        classTeacherOf(s.sectionId());
         String mine = idOf(send("POST", "/api/v1/students", s.admin(),
                 studentJson("P-1", s.sectionId(), guardianWithEmail("raj@example.com"))).body());
         String other = idOf(send("POST", "/api/v1/students", s.admin(),
@@ -1004,5 +1045,144 @@ class AcademicApiIntegrationTest {
         assertThat(send("PUT", path + "/marks", other, marksBody(student, s.maths(), "50")).statusCode()).isEqualTo(404);
         assertThat(send("GET", path + "/report-card/" + student, other, null).statusCode()).isEqualTo(404);
         assertThat(send("POST", path + "/publish", other, null).statusCode()).isEqualTo(404);
+    }
+
+    @Test
+    void staffAppearFromLoginEvents_andAssignmentsFollowTheRules() throws Exception {
+        String admin = admin(tenantA);
+        String[] c = classWithTwoSections(admin);
+        UUID second = UUID.randomUUID();
+        UserLoginEvent event = new UserLoginEvent(UUID.randomUUID(), UserLoginEvent.TEACHER_LOGIN_CREATED, tenantA,
+                "Meena@School.com", teacherSub, "Meena", "Gupta", java.time.Instant.now());
+        staffLogins.apply(event);
+        staffLogins.apply(event);
+        staffLogins.apply(new UserLoginEvent(UUID.randomUUID(), UserLoginEvent.TEACHER_LOGIN_CREATED, tenantA,
+                "ravi@school.com", second, "Ravi", "Singh", java.time.Instant.now()));
+        staffLogins.apply(new UserLoginEvent(UUID.randomUUID(), UserLoginEvent.TEACHER_LOGIN_CREATED, tenantB,
+                "meena@elsewhere.com", teacherSub, "Meena", "Gupta", java.time.Instant.now()));   // never moves schools
+
+        String list = send("GET", "/api/v1/staff", admin, null).body();
+        assertThat(count(list, "meena@school.com")).as("a repeated event creates one record").isEqualTo(1);
+        assertThat(list).contains("ravi@school.com").doesNotContain("elsewhere");
+        assertThat(send("GET", "/api/v1/staff", admin(tenantB), null).body()).isEqualTo("[]");
+        assertThat(send("GET", "/api/v1/staff", teacher(tenantA), null).statusCode()).as("admin only").isEqualTo(403);
+
+        UUID meena = staff.findByKeycloakId(teacherSub).orElseThrow().getId();
+        UUID ravi = staff.findByKeycloakId(second).orElseThrow().getId();
+        String english = subject(admin, "English");
+
+        assign(meena, c[1], null, true, 201);
+        assign(ravi, c[1], null, true, 409);                  // one class teacher per section
+        assign(ravi, c[2], null, true, 201);
+        assign(meena, c[1], null, false, 400);                // a subject teacher needs a subject
+        assign(meena, c[1], english, true, 400);              // a class teacher has no subject
+        assign(meena, c[1], english, false, 201);
+        assign(meena, c[1], english, false, 409);             // no duplicates
+        assign(meena, UUID.randomUUID().toString(), null, true, 404);
+
+        String bodyForOtherSchool = "{\"staffId\":\"" + meena + "\",\"sectionId\":\"" + c[2] + "\",\"classTeacher\":true}";
+        assertThat(send("POST", "/api/v1/assignments", admin(tenantB), bodyForOtherSchool).statusCode()).isEqualTo(404);
+        assertThat(send("POST", "/api/v1/assignments", teacher(tenantA), bodyForOtherSchool).statusCode()).isEqualTo(403);
+
+        String assignmentId = idOf(send("GET", "/api/v1/staff", admin, null).body().split("ravi@school.com")[1]);
+        assertThat(send("DELETE", "/api/v1/assignments/" + assignmentId, teacher(tenantA), null).statusCode()).isEqualTo(403);
+        assertThat(send("DELETE", "/api/v1/assignments/" + assignmentId, admin, null).statusCode()).isEqualTo(204);
+        assign(meena, c[2], null, true, 201);                 // the freed section can have a class teacher again
+
+        assertThat(send("DELETE", "/api/v1/subjects/" + english, admin, null).statusCode())
+                .as("a subject that is assigned cannot be deleted").isEqualTo(409);
+    }
+
+    @Test
+    void aTeacherSeesAndEditsOnlyTheirOwnSections() throws Exception {
+        String admin = admin(tenantA);
+        String[] c = classWithTwoSections(admin);
+        String inA = studentInSection(admin, "T-A", c[1]);
+        String inB = studentInSection(admin, "T-B", c[2]);
+        classTeacherOf(c[1]);
+        String teacher = teacher(tenantA);
+
+        String mine = send("GET", "/api/v1/students", teacher, null).body();
+        assertThat(mine).contains("T-A").doesNotContain("T-B");
+        assertThat(send("GET", "/api/v1/students?search=T-B", teacher, null).body()).contains("\"totalElements\":0");
+        assertThat(send("GET", "/api/v1/students?sectionId=" + c[2], teacher, null).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/students?unassigned=true", teacher, null).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/students/" + inA, teacher, null).statusCode()).isEqualTo(200);
+        assertThat(send("GET", "/api/v1/students/" + inB, teacher, null).statusCode()).as("looks like it does not exist").isEqualTo(404);
+        assertThat(send("GET", "/api/v1/students", admin, null).body()).contains("T-A").contains("T-B");
+
+        assertThat(send("GET", "/api/v1/attendance/sections/" + c[1], teacher, null).statusCode()).isEqualTo(200);
+        assertThat(send("GET", "/api/v1/attendance/sections/" + c[2], teacher, null).statusCode()).isEqualTo(403);
+        assertThat(send("PUT", "/api/v1/attendance/sections/" + c[2], teacher, marks(inB, "ABSENT")).statusCode()).isEqualTo(403);
+        assertThat(send("PUT", "/api/v1/attendance/sections/" + c[2], admin, marks(inB, "ABSENT")).statusCode()).isEqualTo(200);
+
+        String teaching = send("GET", "/api/v1/me/teaching", teacher, null).body();
+        assertThat(teaching).contains("\"admin\":false").contains("\"sectionName\":\"A\"").doesNotContain("\"sectionName\":\"B\"");
+        assertThat(send("GET", "/api/v1/me/teaching", admin, null).body()).contains("\"admin\":true");
+
+        String unassigned = "TEACHER." + tenantA + "." + UUID.randomUUID();
+        assertThat(send("GET", "/api/v1/students", unassigned, null).body()).contains("\"totalElements\":0");
+        assertThat(send("GET", "/api/v1/attendance/sections/" + c[1], unassigned, null).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/me/teaching", unassigned, null).body()).contains("\"sections\":[]");
+    }
+
+    @Test
+    void aDeactivatedTeacherLosesAccessAtOnce() throws Exception {
+        String admin = admin(tenantA);
+        String section = classWithSections(admin);
+        studentInSection(admin, "D-1", section);
+        classTeacherOf(section);
+        UUID staffId = teacherStaffId();
+        assertThat(send("GET", "/api/v1/students", teacher(tenantA), null).body()).contains("D-1");
+
+        assertThat(send("PUT", "/api/v1/staff/" + staffId, admin, "{\"designation\":\"Maths\",\"active\":false}").body())
+                .contains("\"active\":false").contains("Maths");
+
+        assertThat(send("GET", "/api/v1/students", teacher(tenantA), null).body()).contains("\"totalElements\":0");
+        assign(staffId, section, null, true, 400);   // an inactive teacher cannot be given new work
+    }
+
+    @Test
+    void marksFollowSubjectAssignments() throws Exception {
+        ExamSetup s = examSetup(tenantA);
+        String student = studentInSection(s.admin(), "M-1", s.sectionId());
+        String path = "/api/v1/exams/" + s.examId() + "/marks";
+        String teacher = teacher(tenantA);
+
+        assertThat(send("PUT", path, teacher, marksBody(student, s.english(), "40")).statusCode()).as("no assignment yet").isEqualTo(403);
+        assertThat(send("GET", path, teacher, null).body()).as("sees no students yet").doesNotContain("M-1");
+
+        teachesSubject(s.sectionId(), s.englishSubject());
+        assertThat(send("PUT", path, teacher, marksBody(student, s.english(), "40")).statusCode()).isEqualTo(200);
+        assertThat(send("PUT", path, teacher, marksBody(student, s.maths(), "80")).statusCode()).as("not their subject").isEqualTo(403);
+        assertThat(send("PUT", path, teacher, marksBody(student, s.english(), "41", student, s.maths(), "80")).statusCode())
+                .as("one forbidden mark rejects the whole request").isEqualTo(403);
+        String grid = send("GET", path, teacher, null).body();
+        assertThat(grid).contains("M-1").contains("\"editableSubjectIds\":[\"" + s.english() + "\"]").contains("\"marks\":40.00");
+        assertThat(send("GET", "/api/v1/exams/" + s.examId() + "/report-card/" + student, teacher, null).statusCode()).isEqualTo(200);
+
+        classTeacherOf(s.sectionId());
+        assertThat(send("PUT", path, teacher, marksBody(student, s.maths(), "80")).statusCode()).as("class teachers may enter any subject").isEqualTo(200);
+        assertThat(send("PUT", path, s.admin(), marksBody(student, s.maths(), "81")).statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void teachersCannotSeeResultsOrReportCardsOfOtherSections() throws Exception {
+        String admin = admin(tenantA);
+        String[] c = classWithTwoSections(admin);
+        String eng = subject(admin, "English");
+        String body = "{\"classId\":\"" + c[0] + "\",\"name\":\"Term 1\",\"subjects\":[{\"subjectId\":\"" + eng + "\",\"maxMarks\":\"50\",\"passMarks\":\"18\"}]}";
+        String examId = idOf(send("POST", "/api/v1/exams", admin, body).body());
+        String inA = studentInSection(admin, "R-A", c[1]);
+        String inB = studentInSection(admin, "R-B", c[2]);
+        classTeacherOf(c[1]);
+        String teacher = teacher(tenantA);
+        String path = "/api/v1/exams/" + examId;
+
+        assertThat(send("GET", path + "/results", teacher, null).body()).contains("R-A").doesNotContain("R-B");
+        assertThat(send("GET", path + "/results?sectionId=" + c[2], teacher, null).statusCode()).isEqualTo(403);
+        assertThat(send("GET", path + "/report-card/" + inA, teacher, null).statusCode()).isEqualTo(200);
+        assertThat(send("GET", path + "/report-card/" + inB, teacher, null).statusCode()).isEqualTo(404);
+        assertThat(send("GET", path + "/marks", teacher, null).body()).contains("R-A").doesNotContain("R-B");
     }
 }

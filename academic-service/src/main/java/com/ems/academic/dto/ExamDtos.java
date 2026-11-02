@@ -43,7 +43,8 @@ public final class ExamDtos {
     public record MarksSaveResponse(int received, int changed) {}
 
     public record GridCell(BigDecimal marks, boolean absent) {}
-    public record GridRow(UUID studentId, String name, String admissionNo, Map<UUID, GridCell> cells) {}
+    public record GridRow(UUID studentId, String name, String admissionNo, Map<UUID, GridCell> cells,
+                          List<UUID> editableSubjectIds) {}
     public record MarksGrid(ExamView exam, List<GridRow> rows) {}
 
     public record ReportLine(String subject, BigDecimal maxMarks, BigDecimal passMarks, BigDecimal marks,

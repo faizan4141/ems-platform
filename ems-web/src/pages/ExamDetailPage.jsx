@@ -4,7 +4,7 @@ import { useDispatch } from 'react-redux';
 import { pushToast } from '../features/ui/uiSlice';
 import { useAuth } from '../features/auth/useAuth';
 import { RESULT, cellKey, cellText, fmt, parseMark, pendingChanges } from '../app/exams';
-import { useListClassesQuery } from '../services/academicApi';
+import { useSectionOptions } from '../app/useSectionOptions';
 import {
   useGetAuditQuery, useGetExamQuery, useGetGridQuery, useGetResultsQuery, usePublishExamMutation,
   useReopenExamMutation, useSaveMarksMutation,
@@ -49,9 +49,10 @@ function MarksGrid({ grid, editable }) {
                 {subjects.map((s) => {
                   const key = cellKey(row.studentId, s.examSubjectId);
                   const text = key in edits ? edits[key] : cellText(row.cells[s.examSubjectId]);
+                  const canEdit = editable && row.editableSubjectIds.includes(s.examSubjectId);
                   return (
                     <td key={key}>
-                      {editable ? (
+                      {canEdit ? (
                         <input className="marks-input" inputMode="decimal" value={text}
                                aria-label={`${row.name}, ${s.subjectName}`} aria-invalid={!parseMark(text, s.maxMarks).ok}
                                onChange={(e) => setEdits({ ...edits, [key]: e.target.value })} />
@@ -82,7 +83,7 @@ export default function ExamDetailPage() {
   const dispatch = useDispatch();
   const isAdmin = useAuth().roles.includes('TENANT_ADMIN');
   const { data: exam, error } = useGetExamQuery(id);
-  const { data: classes = [] } = useListClassesQuery();
+  const { options } = useSectionOptions();
   const [sectionId, setSectionId] = useState('');
   const { data: grid } = useGetGridQuery({ examId: id, sectionId }, { skip: !exam });
   const { data: results } = useGetResultsQuery({ examId: id, sectionId }, { skip: !exam });
@@ -94,7 +95,7 @@ export default function ExamDetailPage() {
   if (error) return <><Link to="/exams" className="btn-link">← Exams</Link><ErrorNotice error={error} /></>;
   if (!exam) return <div className="skeleton" style={{ width: '40%' }} />;
 
-  const sections = classes.find((c) => c.id === exam.classId)?.sections ?? [];
+  const sections = options.filter((o) => o.classId === exam.classId);
   const draft = exam.status === 'DRAFT';
 
   const doPublish = async () => {
@@ -133,7 +134,7 @@ export default function ExamDetailPage() {
             <Field label="Section">
               <select value={sectionId} onChange={(e) => setSectionId(e.target.value)}>
                 <option value="">All sections</option>
-                {sections.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {sections.map((s) => <option key={s.id} value={s.id}>{s.sectionName}</option>)}
               </select>
             </Field>
           )}

@@ -1,10 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth } from '../features/auth/useAuth';
 import { useDebounced } from '../app/useDebounced';
+import { useSectionOptions } from '../app/useSectionOptions';
 import { fullName, placementLabel } from '../app/students';
 import { statusTone } from '../app/format';
-import { useListClassesQuery } from '../services/academicApi';
 import { useListStudentsQuery } from '../services/studentsApi';
 import ImportDialog from '../components/ImportDialog';
 import StudentForm from '../components/StudentForm';
@@ -13,32 +12,39 @@ import { Chip, EmptyState, ErrorNotice, Field, PageHeader, SkeletonRows } from '
 const PAGE_SIZE = 20;
 
 export default function StudentsPage() {
-  const canManage = useAuth().roles.includes('TENANT_ADMIN');
+  const { options: sectionOptions, isAdmin, ready } = useSectionOptions();
   const [search, setSearch] = useState('');
   const debounced = useDebounced(search);
-  const [filter, setFilter] = useState('');          // '', 'unassigned', or a section id
+  const [filter, setFilter] = useState('');          // '', 'unassigned' (admins only), or a section id
   const [page, setPage] = useState(0);
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
 
-  const { data: classes = [] } = useListClassesQuery();
-  const sectionOptions = useMemo(
-    () => classes.flatMap((c) => c.sections.map((s) => ({ id: s.id, label: `${c.name} · ${s.name}` }))),
-    [classes],
-  );
-
+  const noAccess = !isAdmin && ready && sectionOptions.length === 0;
   const { data, isLoading, error } = useListStudentsQuery({
     page, size: PAGE_SIZE, search: debounced,
     sectionId: filter && filter !== 'unassigned' ? filter : '', unassigned: filter === 'unassigned',
-  });
+  }, { skip: noAccess || (!isAdmin && !ready) });
 
   const total = data?.totalElements ?? 0;
   const pages = Math.max(data?.totalPages ?? 1, 1);
 
+  if (noAccess) {
+    return (
+      <>
+        <PageHeader title="Students" />
+        <section className="card">
+          <EmptyState title="You are not assigned to any class yet"
+            text="Ask a school admin to assign you to a class. You will then see its students here." />
+        </section>
+      </>
+    );
+  }
+
   return (
     <>
-      <PageHeader title="Students" subtitle={isLoading ? 'Loading…' : `${total} in your school`}
-        action={canManage && (
+      <PageHeader title="Students" subtitle={isLoading ? 'Loading…' : `${total} ${isAdmin ? 'in your school' : 'in your classes'}`}
+        action={isAdmin && (
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-secondary" onClick={() => setShowImport(true)}>Import CSV</button>
             <button className="btn btn-primary" onClick={() => setShowAdd((v) => !v)}>
@@ -47,7 +53,7 @@ export default function StudentsPage() {
           </div>
         )} />
 
-      {canManage && showAdd && (
+      {isAdmin && showAdd && (
         <section className="card">
           <h2>Add a student</h2>
           <StudentForm sectionOptions={sectionOptions} onDone={() => setShowAdd(false)} />
@@ -64,8 +70,8 @@ export default function StudentsPage() {
           </div>
           <Field label="Show">
             <select value={filter} onChange={(e) => { setFilter(e.target.value); setPage(0); }}>
-              <option value="">All students</option>
-              <option value="unassigned">Not assigned to a section</option>
+              <option value="">{isAdmin ? 'All students' : 'All my classes'}</option>
+              {isAdmin && <option value="unassigned">Not assigned to a section</option>}
               {sectionOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
             </select>
           </Field>
@@ -104,7 +110,7 @@ export default function StudentsPage() {
         )}
       </section>
 
-      {canManage && <ImportDialog open={showImport} onClose={() => setShowImport(false)} />}
+      {isAdmin && <ImportDialog open={showImport} onClose={() => setShowImport(false)} />}
     </>
   );
 }

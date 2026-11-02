@@ -25,6 +25,7 @@ import ExamsPage from './pages/ExamsPage';
 import ExamSetupPage from './pages/ExamSetupPage';
 import ExamDetailPage from './pages/ExamDetailPage';
 import ReportCardPage from './pages/ReportCardPage';
+import StaffPage from './pages/StaffPage';
 
 function AuthGate({ children }) {
   const dispatch = useDispatch();
@@ -74,6 +75,8 @@ export default function App() {
           <Route path="exams/setup" element={<RequireRole roles={['TENANT_ADMIN']}><ExamSetupPage /></RequireRole>} />
           <Route path="exams/:id" element={<RequireRole roles={['TENANT_ADMIN', 'TEACHER']}><ExamDetailPage /></RequireRole>} />
           <Route path="exams/:examId/report/:studentId" element={<RequireRole roles={['TENANT_ADMIN', 'TEACHER']}><ReportCardPage /></RequireRole>} />
+          <Route path="users" element={<RequireRole roles={['TENANT_ADMIN']}><UsersPage /></RequireRole>} />
+          <Route path="staff" element={<RequireRole roles={['TENANT_ADMIN']}><StaffPage /></RequireRole>} />
         </Route>
       </Routes>
     </AuthGate>

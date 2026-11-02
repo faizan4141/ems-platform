@@ -2,6 +2,7 @@ package com.ems.academic.web;
 
 import com.ems.academic.dto.*;
 import com.ems.academic.exception.InvalidRequestException;
+import com.ems.academic.security.Caller;
 import com.ems.academic.security.TenantClaims;
 import com.ems.academic.service.StudentImportService;
 import com.ems.academic.service.StudentService;
@@ -10,6 +11,7 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.validation.annotation.Validated;
@@ -39,13 +41,14 @@ public class StudentController {
                                              @RequestParam(defaultValue = "false") boolean unassigned,
                                              @RequestParam(required = false) String search,
                                              @RequestParam(defaultValue = "0") int page,
-                                             @RequestParam(defaultValue = "20") int size) {
-        return service.list(TenantClaims.requireTenantId(jwt), sectionId, unassigned, search, page, size);
+                                             @RequestParam(defaultValue = "20") int size,
+                                             Authentication authentication) {
+        return service.list(Caller.of(jwt, authentication), sectionId, unassigned, search, page, size);
     }
 
     @GetMapping("/{id}")
-    public StudentDetail get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return service.get(TenantClaims.requireTenantId(jwt), id);
+    public StudentDetail get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id, Authentication authentication) {
+        return service.get(Caller.of(jwt, authentication), id);
     }
 
     @PostMapping

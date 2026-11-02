@@ -2,12 +2,14 @@ package com.ems.academic.web;
 
 import com.ems.academic.dto.ExamDtos.*;
 import com.ems.academic.security.Actors;
+import com.ems.academic.security.Caller;
 import com.ems.academic.security.TenantClaims;
 import com.ems.academic.service.ExamService;
 import com.ems.academic.service.MarksService;
 import com.ems.academic.service.ReportCardService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
@@ -52,21 +54,21 @@ public class ExamController {
     }
 
     @GetMapping("/{id}/marks")
-    public MarksGrid grid(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+    public MarksGrid grid(@AuthenticationPrincipal Jwt jwt, Authentication authentication, @PathVariable UUID id,
                           @RequestParam(required = false) UUID sectionId) {
-        return marks.grid(TenantClaims.requireTenantId(jwt), id, sectionId);
+        return marks.grid(Caller.of(jwt, authentication), id, sectionId);
     }
 
     @PutMapping("/{id}/marks")
-    public MarksSaveResponse save(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+    public MarksSaveResponse save(@AuthenticationPrincipal Jwt jwt, Authentication authentication, @PathVariable UUID id,
                                   @Valid @RequestBody MarksRequest request) {
-        return marks.save(TenantClaims.requireTenantId(jwt), id, request, Actors.name(jwt));
+        return marks.save(Caller.of(jwt, authentication), id, request);
     }
 
     @GetMapping("/{id}/results")
-    public ClassResults results(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+    public ClassResults results(@AuthenticationPrincipal Jwt jwt, Authentication authentication, @PathVariable UUID id,
                                 @RequestParam(required = false) UUID sectionId) {
-        return marks.results(TenantClaims.requireTenantId(jwt), id, sectionId);
+        return marks.results(Caller.of(jwt, authentication), id, sectionId);
     }
 
     @PostMapping("/{id}/publish")
@@ -86,7 +88,8 @@ public class ExamController {
     }
 
     @GetMapping("/{id}/report-card/{studentId}")
-    public ReportCard reportCard(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id, @PathVariable UUID studentId) {
-        return reports.forStaff(TenantClaims.requireTenantId(jwt), id, studentId);
+    public ReportCard reportCard(@AuthenticationPrincipal Jwt jwt, Authentication authentication,
+                                 @PathVariable UUID id, @PathVariable UUID studentId) {
+        return reports.forStaff(Caller.of(jwt, authentication), id, studentId);
     }
 }

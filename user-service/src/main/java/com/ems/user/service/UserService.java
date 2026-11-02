@@ -56,7 +56,7 @@ public class UserService {
         u = users.saveAndFlush(u);
 
         provisionLogin(u);
-        announceParentLogin(u);
+        announceLogin(u);
         boolean invitationSent = trySendInvitation(u);
         return new CreateUserResponse(UserResponse.from(u), invitationSent);
     }
@@ -78,7 +78,7 @@ public class UserService {
         if (u.getKeycloakId() == null) {
             provisionLogin(u);   // users created before Step 9 get their login now
         }
-        announceParentLogin(u);
+        announceLogin(u);
         identity.sendSetPasswordEmail(u.getKeycloakId());
     }
 
@@ -144,10 +144,11 @@ public class UserService {
         });
     }
 
-    /** Tells other services that a parent login exists, so children can be linked to it. */
-    private void announceParentLogin(User u) {
-        if (u.getRole() == Role.PARENT && u.getKeycloakId() != null) {
-            events.publishEvent(UserLoginEvent.parentLogin(u));
+    /** Tells other services that a parent or teacher login exists, so they can link it to children or classes. */
+    private void announceLogin(User u) {
+        String type = UserLoginEvent.typeFor(u.getRole());
+        if (type != null && u.getKeycloakId() != null) {
+            events.publishEvent(UserLoginEvent.of(u, type));
         }
     }
 }

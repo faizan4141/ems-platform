@@ -7,6 +7,7 @@ import com.ems.academic.exception.DuplicateResourceException;
 import com.ems.academic.exception.ResourceNotFoundException;
 import com.ems.academic.repository.ExamSubjectRepository;
 import com.ems.academic.repository.SubjectRepository;
+import com.ems.academic.repository.TeachingAssignmentRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,11 +20,13 @@ public class SubjectService {
     private final SubjectRepository subjects;
     private final ExamSubjectRepository examSubjects;
     private final TenantGuard guard;
+    private final TeachingAssignmentRepository assignments;
 
-    public SubjectService(SubjectRepository subjects, ExamSubjectRepository examSubjects, TenantGuard guard) {
+    public SubjectService(SubjectRepository subjects, ExamSubjectRepository examSubjects, TenantGuard guard, TeachingAssignmentRepository assignments) {
         this.subjects = subjects;
         this.examSubjects = examSubjects;
         this.guard = guard;
+        this.assignments = assignments;
     }
 
     @Transactional(readOnly = true)
@@ -50,8 +53,8 @@ public class SubjectService {
         guard.requireActive(tenantId);
         Subject subject = subjects.findByIdAndTenantId(id, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Subject not found"));
-        if (examSubjects.existsBySubjectId(id)) {
-            throw new DuplicateResourceException("This subject is used by an exam and cannot be deleted");
+        if (examSubjects.existsBySubjectId(id) || assignments.existsBySubjectId(id)) {
+            throw new DuplicateResourceException("This subject is used by an exam or a teacher and cannot be deleted");
         }
         subjects.delete(subject);
     }

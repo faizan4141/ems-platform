@@ -1,21 +1,51 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../features/auth/useAuth';
 import { useListUsersQuery } from '../services/usersApi';
-import { Chip, PageHeader } from '../components/ui';
 import { useGetOnboardingQuery } from '../services/academicApi';
 import { useListStudentsQuery } from '../services/studentsApi';
 import { useGetAttendanceSummaryQuery } from '../services/attendanceApi';
+import { useGetMyTeachingQuery } from '../services/staffApi';
+import { Chip, EmptyState, PageHeader } from '../components/ui';
+
+function TeacherClasses() {
+  const { data: teaching } = useGetMyTeachingQuery();
+  const sections = teaching?.sections ?? [];
+  return (
+    <section className="card">
+      <div className="page-header" style={{ marginBottom: 12 }}>
+        <h2 style={{ margin: 0 }}>Your classes</h2>
+        <Link className="btn btn-primary" to="/attendance">Take attendance</Link>
+      </div>
+      {teaching && sections.length === 0 ? (
+        <EmptyState title="You are not assigned to any class yet" text="Ask a school admin to assign you. Your classes appear here." />
+      ) : (
+        <ul className="checklist">
+          {sections.map((s) => (
+            <li key={s.sectionId}>
+              <strong>{s.className} · {s.sectionName}</strong>
+              <span className="row-actions">
+                {s.classTeacher && <Chip tone="info">Class teacher</Chip>}
+                {s.subjects.map((x) => <Chip key={x.id} tone="neutral">{x.name}</Chip>)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 
 export default function DashboardPage() {
   const { firstName, roles } = useAuth();
   const canManage = roles.includes('TENANT_ADMIN');
-  const { data: onboarding } = useGetOnboardingQuery(undefined, { skip: !canManage });
-  const { data: studentPage } = useListStudentsQuery({ size: 1 });
-  const { data: users = [], isLoading } = useListUsersQuery();
   const { data: attendance } = useGetAttendanceSummaryQuery();
+  const { data: onboarding } = useGetOnboardingQuery(undefined, { skip: !canManage });
+  const { data: users = [], isLoading: usersLoading } = useListUsersQuery(undefined, { skip: !canManage });
+  const { data: studentPage } = useListStudentsQuery({ size: 1 });
+
   const count = (role) => users.filter((u) => u.role === role).length;
   const pendingLogins = users.filter((u) => !u.hasLogin).length;
-  const show = (n) => (isLoading ? '…' : n);
+  const show = (n) => (usersLoading ? '…' : n);
 
   const kpis = [
     {
@@ -25,11 +55,14 @@ export default function DashboardPage() {
         {attendance ? `${attendance.sectionsTaken} of ${attendance.sectionsTotal} classes done` : '…'}
       </Chip>,
     },
-    { label: 'People', value: show(users.length), chip: <Chip tone="info">In your school</Chip> },
-    { label: 'Teachers', value: show(count('TEACHER')), chip: <Chip tone="ok">Staff</Chip> },
-    { label: 'Students', value: studentPage ? studentPage.totalElements : '…', chip: <Chip tone="info">Enrolled</Chip> },
-    { label: 'Logins to set up', value: show(pendingLogins),
-      chip: <Chip tone={pendingLogins > 0 ? 'warn' : 'ok'}>{pendingLogins > 0 ? 'Needs attention' : 'All set'}</Chip> },
+    { label: canManage ? 'Students' : 'Your students', value: studentPage ? studentPage.totalElements : '…',
+      chip: <Chip tone="info">{canManage ? 'Enrolled' : 'In your classes'}</Chip> },
+    ...(canManage ? [
+      { label: 'People', value: show(users.length), chip: <Chip tone="info">In your school</Chip> },
+      { label: 'Teachers', value: show(count('TEACHER')), chip: <Chip tone="ok">Staff</Chip> },
+      { label: 'Logins to set up', value: show(pendingLogins),
+        chip: <Chip tone={pendingLogins > 0 ? 'warn' : 'ok'}>{pendingLogins > 0 ? 'Needs attention' : 'All set'}</Chip> },
+    ] : []),
   ];
 
   const steps = [
@@ -43,7 +76,7 @@ export default function DashboardPage() {
   return (
     <>
       <PageHeader title={`Hello, ${firstName || 'there'}`} subtitle="Here is your school at a glance."
-        action={<Link className="btn btn-primary" to="/users">Manage people</Link>} />
+        action={canManage && <Link className="btn btn-primary" to="/users">Manage people</Link>} />
 
       <div className="kpis">
         {kpis.map((k) => (
@@ -56,21 +89,19 @@ export default function DashboardPage() {
       </div>
 
       <div className="two-col">
-        {canManage && (
+        {canManage ? (
           <section className="card">
             <h2>Getting started</h2>
             <ul className="checklist">
               {steps.map((s) => (
                 <li key={s.label}>
                   <span>{s.label}</span>
-                  {s.done ? <Chip tone="ok">Done</Chip>
-                    : s.to ? <Link className="btn-link" to={s.to}>Start</Link>
-                    : <Chip tone="neutral">Soon</Chip>}
+                  {s.done ? <Chip tone="ok">Done</Chip> : <Link className="btn-link" to={s.to}>Start</Link>}
                 </li>
               ))}
             </ul>
           </section>
-        )}
+        ) : <TeacherClasses />}
         <section className="card card-accent">
           <h2>The UniTent network</h2>
           <p className="muted">Share lesson plans, join inter-school events and be discovered by new families. Coming soon.</p>

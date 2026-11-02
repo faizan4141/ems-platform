@@ -109,7 +109,7 @@ public class ExamService {
         }
         ExamData.Loaded data = examData.load(examId);
         List<UUID> subjectIds = data.examSubjects().stream().map(ExamSubject::getId).toList();
-        List<UUID> studentIds = examData.roster(tenantId, exam.getClassId(), null).stream().map(Student::getId).toList();
+        List<UUID> studentIds = examData.roster(tenantId, exam.getClassId(), null, null).stream().map(Student::getId).toList();
         if (studentIds.isEmpty()) {
             throw new InvalidRequestException("There are no active students in this class");
         }

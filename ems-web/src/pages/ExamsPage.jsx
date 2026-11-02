@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { pushToast } from '../features/ui/uiSlice';
-import { useAuth } from '../features/auth/useAuth';
 import { useListClassesQuery } from '../services/academicApi';
 import { useCreateExamMutation, useListExamsQuery, useListSubjectsQuery } from '../services/examsApi';
 import { Chip, EmptyState, ErrorNotice, Field, PageHeader } from '../components/ui';
+import { useSectionOptions } from '../app/useSectionOptions';
 
 function NewExamForm({ classId, onDone }) {
   const dispatch = useDispatch();
@@ -61,8 +61,10 @@ function NewExamForm({ classId, onDone }) {
 }
 
 export default function ExamsPage() {
-  const isAdmin = useAuth().roles.includes('TENANT_ADMIN');
-  const { data: classes = [] } = useListClassesQuery();
+  const { classIds, isAdmin: admin } = useSectionOptions();
+  const isAdmin = admin;
+  const { data: allClasses = [] } = useListClassesQuery();
+  const classes = isAdmin ? allClasses : allClasses.filter((c) => classIds.includes(c.id));
   const [chosen, setChosen] = useState('');
   const [showNew, setShowNew] = useState(false);
   const classId = chosen || classes[0]?.id || '';

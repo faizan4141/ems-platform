@@ -42,12 +42,15 @@ public class ExamData {
         return new Loaded(list, names, inputs);
     }
 
-    /** Active students currently in the class, optionally limited to one of its sections. */
-    public List<Student> roster(UUID tenantId, UUID classId, UUID onlySection) {
+    /** Active students in the class. onlySection narrows to one section; allowed (null = all) narrows to a caller's sections. */
+    public List<Student> roster(UUID tenantId, UUID classId, UUID onlySection, Set<UUID> allowed) {
         Set<UUID> sectionIds = sections.findByClassId(classId).stream().map(Section::getId).collect(Collectors.toSet());
         if (onlySection != null) {
             if (!sectionIds.contains(onlySection)) throw new ResourceNotFoundException("Section not found");
             sectionIds = Set.of(onlySection);
+        }
+        if (allowed != null) {
+            sectionIds = sectionIds.stream().filter(allowed::contains).collect(Collectors.toSet());
         }
         if (sectionIds.isEmpty()) return List.of();
         return students.findByTenantIdAndSectionIdInAndStatus(tenantId, sectionIds, StudentStatus.ACTIVE).stream()

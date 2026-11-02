@@ -10,6 +10,8 @@ import com.ems.academic.repository.*;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.ems.academic.security.Caller;
+import com.ems.academic.exception.OperationNotAllowedException;
 
 import java.time.Clock;
 import java.time.LocalDate;
@@ -29,11 +31,12 @@ public class AttendanceService {
     private final TenantGuard guard;
     private final ApplicationEventPublisher events;
     private final Clock clock;
+    private final AccessService access;
 
     public AttendanceService(AttendanceSessionRepository sessions, AttendanceRecordRepository records,
                              StudentRepository students, GuardianRepository guardians, SectionRepository sections,
                              ClassRepository classes, SchoolProfileRepository profiles, TenantGuard guard,
-                             ApplicationEventPublisher events, Clock clock) {
+                             ApplicationEventPublisher events, Clock clock, AccessService access) {
         this.sessions = sessions;
         this.records = records;
         this.students = students;
@@ -44,13 +47,16 @@ public class AttendanceService {
         this.guard = guard;
         this.events = events;
         this.clock = clock;
+        this.access = access;
     }
 
     @Transactional(readOnly = true)
-    public RosterResponse roster(UUID tenantId, UUID sectionId, LocalDate date) {
+    public RosterResponse roster(Caller caller, UUID sectionId, LocalDate date) {
+        UUID tenantId = caller.tenantId();
         guard.requireActive(tenantId);
         LocalDate day = resolveDate(date);
         Section section = requireSection(tenantId, sectionId);
+        requireAccess(caller, section);
         SchoolClass schoolClass = requireClass(section);
         List<Student> roster = activeStudents(tenantId, sectionId);
 
@@ -68,8 +74,10 @@ public class AttendanceService {
     }
 
     @Transactional
-    public SaveResponse save(UUID tenantId, UUID sectionId, LocalDate date, AttendanceRequest req,
-                             boolean admin, String actor) {
+    public SaveResponse save(Caller caller, UUID sectionId, LocalDate date, AttendanceRequest req) {
+        UUID tenantId = caller.tenantId();
+        boolean admin = caller.admin();
+        String actor = caller.subject();
         TenantSnapshot tenant = guard.requireActive(tenantId);
         LocalDate today = LocalDate.now(clock);
         LocalDate day = date == null ? today : date;
@@ -81,6 +89,7 @@ public class AttendanceService {
         }
 
         Section section = requireSection(tenantId, sectionId);
+        requireAccess(caller, section);
         SchoolClass schoolClass = requireClass(section);
         List<Student> roster = activeStudents(tenantId, sectionId);
         if (roster.isEmpty()) {
@@ -200,5 +209,11 @@ public class AttendanceService {
                     status.get(s.getId()), contact.getName(), contact.getPhone(), contact.getEmail()));
         }
         return alerts;
+    }
+
+    private void requireAccess(Caller caller, Section section) {
+        if (!access.scope(caller).canSeeSection(section.getId())) {
+            throw new OperationNotAllowedException("You are not assigned to this section");
+        }
     }
 }

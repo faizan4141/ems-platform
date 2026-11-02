@@ -19,8 +19,10 @@ public class GuardianLoginService {
     /** Safe to repeat: the login id is the key, so a redelivered event just rewrites the same row. */
     @Transactional
     public void apply(UserLoginEvent event) {
-        if (!UserLoginEvent.PARENT_LOGIN_CREATED.equals(event.eventType()) || event.keycloakId() == null
-                || event.tenantId() == null || event.email() == null || event.email().isBlank()) {
+        if (!UserLoginEvent.PARENT_LOGIN_CREATED.equals(event.eventType())) {
+            return;   // other event types belong to other services
+        }
+        if (event.keycloakId() == null || event.tenantId() == null || event.email() == null || event.email().isBlank()) {
             log.warn("Ignoring unusable user event {}", event.eventId());
             return;
         }

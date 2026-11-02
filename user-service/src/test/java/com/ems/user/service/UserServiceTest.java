@@ -196,12 +196,27 @@ class UserServiceTest {
     }
 
     @Test
-    void creatingAnyOtherRoleAnnouncesNothing() {
+    void creatingATeacherAnnouncesTheLoginWithTheirName() {
         activeTenant();
         freshEmail("teacher@school.com");
         when(identity.createUser(any(NewLogin.class))).thenReturn(keycloakId);
 
-        service.create(tenantId, request);
+        service.create(tenantId, request);   // the TEACHER request: Asha Verma
+
+        ArgumentCaptor<UserLoginEvent> captor = ArgumentCaptor.forClass(UserLoginEvent.class);
+        verify(events).publishEvent(captor.capture());
+        assertThat(captor.getValue().eventType()).isEqualTo(UserLoginEvent.TEACHER_LOGIN_CREATED);
+        assertThat(captor.getValue().firstName()).isEqualTo("Asha");
+        assertThat(captor.getValue().lastName()).isEqualTo("Verma");
+    }
+
+    @Test
+    void creatingAStaffMemberAnnouncesNothing() {
+        activeTenant();
+        freshEmail("clerk@school.com");
+        when(identity.createUser(any(NewLogin.class))).thenReturn(keycloakId);
+
+        service.create(tenantId, new CreateUserRequest("clerk@school.com", "Ravi", "Singh", Role.STAFF));
 
         verifyNoInteractions(events);
     }

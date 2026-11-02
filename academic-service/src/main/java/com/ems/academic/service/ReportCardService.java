@@ -4,6 +4,7 @@ import com.ems.academic.domain.*;
 import com.ems.academic.dto.ExamDtos.*;
 import com.ems.academic.exception.ResourceNotFoundException;
 import com.ems.academic.repository.*;
+import com.ems.academic.security.Caller;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,11 +27,12 @@ public class ReportCardService {
     private final GradingService grading;
     private final ParentService parents;
     private final TenantGuard guard;
+    private final AccessService access;
 
     public ReportCardService(ExamRepository exams, ExamMarkRepository examMarks, StudentRepository students,
                              SectionRepository sections, ClassRepository classes, SchoolProfileRepository profiles,
                              ExamData examData, ExamService examService, GradingService grading, ParentService parents,
-                             TenantGuard guard) {
+                             TenantGuard guard, AccessService access) {
         this.exams = exams;
         this.examMarks = examMarks;
         this.students = students;
@@ -42,18 +44,22 @@ public class ReportCardService {
         this.grading = grading;
         this.parents = parents;
         this.guard = guard;
+        this.access = access;
     }
 
-    /** Staff can open a report card at any time, including for a draft exam. */
+    /** Staff can open a report card at any time, including for a draft exam. A teacher only for their own sections. */
     @Transactional(readOnly = true)
-    public ReportCard forStaff(UUID tenantId, UUID examId, UUID studentId) {
+    public ReportCard forStaff(Caller caller, UUID examId, UUID studentId) {
+        UUID tenantId = caller.tenantId();
         TenantSnapshot tenant = guard.requireActive(tenantId);
         Exam exam = examService.require(tenantId, examId);
         Student student = students.findByIdAndTenantId(studentId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Student not found"));
         boolean inClass = student.getSectionId() != null && sections.findByIdAndTenantId(student.getSectionId(), tenantId)
                 .map(s -> s.getClassId().equals(exam.getClassId())).orElse(false);
-        if (!inClass) throw new ResourceNotFoundException("Student not found in this exam's class");
+        if (!inClass || !access.scope(caller).canSeeSection(student.getSectionId())) {
+            throw new ResourceNotFoundException("Student not found in this exam's class");
+        }
         return build(exam, student, tenant, grading.bandsFor(tenantId));
     }
 

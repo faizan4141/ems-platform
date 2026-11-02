@@ -46,13 +46,13 @@ public class UserController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     public List<UserResponse> list(@AuthenticationPrincipal Jwt jwt) {
         return service.list(TenantClaims.requireTenantId(jwt));
     }
 
     @GetMapping("/{userId}")
-    @PreAuthorize("hasAnyRole('TENANT_ADMIN','TEACHER')")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
     public UserResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID userId) {
         return service.get(TenantClaims.requireTenantId(jwt), userId);
     }

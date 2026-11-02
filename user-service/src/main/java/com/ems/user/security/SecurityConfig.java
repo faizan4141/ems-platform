@@ -29,6 +29,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/users").hasRole("TENANT_ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/users/tenant-admins").hasRole("PLATFORM_ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/users/*/invitation").hasRole("TENANT_ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/users", "/api/v1/users/*").hasRole("TENANT_ADMIN")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(converter)));
 

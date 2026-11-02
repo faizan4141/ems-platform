@@ -28,7 +28,7 @@ class GuardianLoginServiceTest {
     private final UUID keycloakId = UUID.randomUUID();
 
     private UserLoginEvent event(String type, String email) {
-        return new UserLoginEvent(UUID.randomUUID(), type, tenantId, email, keycloakId, Instant.now());
+        return new UserLoginEvent(UUID.randomUUID(), type, tenantId, email, keycloakId, "Raj", "Sharma", Instant.now());
     }
 
     @Test

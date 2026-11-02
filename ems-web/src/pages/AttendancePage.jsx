@@ -5,7 +5,7 @@ import { useAuth } from '../features/auth/useAuth';
 import {
   STATUS_LABEL, STATUS_TONE, buildMarks, countStatuses, initialStatuses, isDirty, nextStatus, notifiedText,
 } from '../app/attendance';
-import { useListClassesQuery } from '../services/academicApi';
+import { useSectionOptions } from '../app/useSectionOptions';
 import { useGetRosterQuery, useSaveAttendanceMutation } from '../services/attendanceApi';
 import { Avatar, Chip, EmptyState, ErrorNotice, Field, PageHeader } from '../components/ui';
 
@@ -70,11 +70,7 @@ function RosterEditor({ roster, date }) {
 
 export default function AttendancePage() {
   const isAdmin = useAuth().roles.includes('TENANT_ADMIN');
-  const { data: classes = [] } = useListClassesQuery();
-  const options = useMemo(
-    () => classes.flatMap((c) => c.sections.map((s) => ({ id: s.id, label: `${c.name} · ${s.name}` }))),
-    [classes],
-  );
+  const { options, ready } = useSectionOptions();
   const [sectionId, setSectionId] = useState('');
   const [date, setDate] = useState('');           // empty means "today", decided by the server
   const selected = sectionId || options[0]?.id || '';
@@ -88,7 +84,8 @@ export default function AttendancePage() {
 
       <section className="card">
         {options.length === 0 ? (
-          <EmptyState title="No classes yet" text="Create classes and sections in School setup first." />
+          <EmptyState title={ready && !isAdmin ? 'You are not assigned to any class yet' : 'No classes yet'}
+            text={ready && !isAdmin ? 'Ask a school admin to assign you to a class.' : 'Create classes and sections in School setup first.'} />
         ) : (
           <>
             <div className="toolbar">

@@ -36,6 +36,7 @@ class StudentServiceTest {
     @Mock TenantGuard guard;
     @Mock GuardianLoginRepository logins;
     @InjectMocks StudentService service;
+    @Mock AccessService access;
 
     private final UUID tenantId = UUID.randomUUID();
 

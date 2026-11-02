@@ -9,8 +9,11 @@ describe('navFor', () => {
   it('shows platform admins only the Schools screen', () => {
     expect(labels(['PLATFORM_ADMIN'])).toEqual(['Schools']);
   });
-  it('shows teachers students, people, exams, notices and the shared modules, but not Fees', () => {
-    expect(labels(['TEACHER'])).toEqual(['Dashboard', 'Students', 'People', 'Attendance', 'Exams', 'Notices', 'Network hub']);
+  it('shows teachers their working screens, but not people, staff or fees', () => {
+    expect(labels(['TEACHER'])).toEqual(['Dashboard', 'Students', 'Attendance', 'Exams', 'Notices', 'Network hub']);
+  });
+  it('shows school admins people, staff and fees as well', () => {
+    expect(labels(['TENANT_ADMIN'])).toEqual(expect.arrayContaining(['People', 'Staff', 'Fees', 'School setup']));
   });
   it('shows parents only Today and Notices', () => {
     expect(labels(['PARENT'])).toEqual(['Today', 'Notices']);

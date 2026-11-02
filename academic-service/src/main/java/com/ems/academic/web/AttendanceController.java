@@ -1,6 +1,7 @@
 package com.ems.academic.web;
 
 import com.ems.academic.dto.*;
+import com.ems.academic.security.Caller;
 import com.ems.academic.security.TenantClaims;
 import com.ems.academic.service.AttendanceService;
 import jakarta.validation.Valid;
@@ -22,9 +23,9 @@ public class AttendanceController {
     public AttendanceController(AttendanceService service) { this.service = service; }
 
     @GetMapping("/sections/{sectionId}")
-    public RosterResponse roster(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID sectionId,
+    public RosterResponse roster(@AuthenticationPrincipal Jwt jwt, Authentication authentication, @PathVariable UUID sectionId,
                                  @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        return service.roster(TenantClaims.requireTenantId(jwt), sectionId, date);
+        return service.roster(Caller.of(jwt, authentication), sectionId, date);
     }
 
     @PutMapping("/sections/{sectionId}")
@@ -32,9 +33,7 @@ public class AttendanceController {
                              @PathVariable UUID sectionId,
                              @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
                              @Valid @RequestBody AttendanceRequest request) {
-        boolean admin = authentication.getAuthorities().stream()
-                .anyMatch(a -> "ROLE_TENANT_ADMIN".equals(a.getAuthority()));
-        return service.save(TenantClaims.requireTenantId(jwt), sectionId, date, request, admin, jwt.getSubject());
+        return service.save(Caller.of(jwt, authentication), sectionId, date, request);
     }
 
     @GetMapping("/summary")
