@@ -28,10 +28,11 @@ public class StaffService {
     private final AcademicYearRepository years;
     private final TenantGuard guard;
     private final Clock clock;
+    private final TimetableEntryRepository timetable;
 
     public StaffService(StaffMemberRepository staff, TeachingAssignmentRepository assignments, SectionRepository sections,
                         ClassRepository classes, SubjectRepository subjects, AcademicYearRepository years,
-                        TenantGuard guard, Clock clock) {
+                        TenantGuard guard, Clock clock, TimetableEntryRepository timetable) {
         this.staff = staff;
         this.assignments = assignments;
         this.sections = sections;
@@ -40,6 +41,7 @@ public class StaffService {
         this.years = years;
         this.guard = guard;
         this.clock = clock;
+        this.timetable = timetable;
     }
 
     @Transactional(readOnly = true)
@@ -104,8 +106,14 @@ public class StaffService {
     @Transactional
     public void unassign(UUID tenantId, UUID assignmentId) {
         guard.requireActive(tenantId);
-        assignments.delete(assignments.findByIdAndTenantId(assignmentId, tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException("Assignment not found")));
+        TeachingAssignment assignment = assignments.findByIdAndTenantId(assignmentId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Assignment not found"));
+        if (assignment.getSubjectId() != null && timetable.existsBySectionIdAndStaffIdAndSubjectId(
+                assignment.getSectionId(), assignment.getStaffId(), assignment.getSubjectId())) {
+            throw new DuplicateResourceException(
+                    "This teacher is scheduled for this subject in the timetable. Clear those lessons first.");
+        }
+        assignments.delete(assignment);
     }
 
     /** The sections the caller works with in the current academic year (empty for admins, who may use everything). */

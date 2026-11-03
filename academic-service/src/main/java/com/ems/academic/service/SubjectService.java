@@ -8,6 +8,7 @@ import com.ems.academic.exception.ResourceNotFoundException;
 import com.ems.academic.repository.ExamSubjectRepository;
 import com.ems.academic.repository.SubjectRepository;
 import com.ems.academic.repository.TeachingAssignmentRepository;
+import com.ems.academic.repository.TimetableEntryRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,12 +22,14 @@ public class SubjectService {
     private final ExamSubjectRepository examSubjects;
     private final TenantGuard guard;
     private final TeachingAssignmentRepository assignments;
+    private final TimetableEntryRepository timetable;
 
-    public SubjectService(SubjectRepository subjects, ExamSubjectRepository examSubjects, TenantGuard guard, TeachingAssignmentRepository assignments) {
+    public SubjectService(SubjectRepository subjects, ExamSubjectRepository examSubjects, TenantGuard guard, TeachingAssignmentRepository assignments, TimetableEntryRepository timetable) {
         this.subjects = subjects;
         this.examSubjects = examSubjects;
         this.guard = guard;
         this.assignments = assignments;
+        this.timetable = timetable;
     }
 
     @Transactional(readOnly = true)
@@ -53,8 +56,8 @@ public class SubjectService {
         guard.requireActive(tenantId);
         Subject subject = subjects.findByIdAndTenantId(id, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Subject not found"));
-        if (examSubjects.existsBySubjectId(id) || assignments.existsBySubjectId(id)) {
-            throw new DuplicateResourceException("This subject is used by an exam or a teacher and cannot be deleted");
+        if (examSubjects.existsBySubjectId(id) || assignments.existsBySubjectId(id) || timetable.existsBySubjectId(id)) {
+            throw new DuplicateResourceException("This subject is used by an exam, a teacher or the timetable and cannot be deleted");
         }
         subjects.delete(subject);
     }

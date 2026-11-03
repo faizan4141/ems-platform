@@ -8,6 +8,7 @@ import {
 import { useSectionOptions } from '../app/useSectionOptions';
 import { useGetRosterQuery, useSaveAttendanceMutation } from '../services/attendanceApi';
 import { Avatar, Chip, EmptyState, ErrorNotice, Field, PageHeader } from '../components/ui';
+import { useSearchParams } from 'react-router-dom';
 
 function RosterEditor({ roster, date }) {
   const dispatch = useDispatch();
@@ -73,7 +74,9 @@ export default function AttendancePage() {
   const { options, ready } = useSectionOptions();
   const [sectionId, setSectionId] = useState('');
   const [date, setDate] = useState('');           // empty means "today", decided by the server
-  const selected = sectionId || options[0]?.id || '';
+  const [params] = useSearchParams();
+  const preset = params.get('section');
+  const selected = sectionId || (options.some((o) => o.id === preset) ? preset : options[0]?.id) || '';
 
   const { currentData: roster, isFetching, error } = useGetRosterQuery(
     { sectionId: selected, date }, { skip: !selected });

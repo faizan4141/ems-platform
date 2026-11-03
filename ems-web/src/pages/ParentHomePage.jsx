@@ -20,6 +20,9 @@ import { payableCharges, returnMessage, safeRedirectUrl, selectedTotal } from '.
 import { useListChildResultsQuery } from '../services/examsApi';
 import { RESULT, fmt } from '../app/exams';
 import ReportCardDialog from '../components/ReportCardDialog';
+import { useGetChildTimetableQuery } from '../services/timetableApi';
+import { indexEntries, slotKey } from '../app/timetable';
+import WeekGrid from '../components/WeekGrid';
 
 function PaymentBanner() {
   const dispatch = useDispatch();
@@ -134,6 +137,21 @@ function ResultsCard({ studentId }) {
   );
 }
 
+function TimetableCard({ studentId }) {
+  const { data } = useGetChildTimetableQuery(studentId);
+  if (!data || data.entries.length === 0) return null;   // nothing scheduled yet
+  const entries = indexEntries(data.entries);
+  return (
+    <section className="card">
+      <h2>Timetable <span className="muted" style={{ fontWeight: 400 }}>· {data.className} · {data.sectionName}</span></h2>
+      <WeekGrid periods={data.periods} renderCell={(day, p) => {
+        const e = entries[slotKey(day, p.id)];
+        return e ? <><strong>{e.subjectName}</strong><small>{e.teacherName}</small></> : null;
+      }} />
+    </section>
+  );
+}
+
 function ChildToday({ studentId }) {
   const { data, error } = useGetChildTodayQuery(studentId);
   if (error) return <ErrorNotice error={error} />;
@@ -176,6 +194,7 @@ function ChildToday({ studentId }) {
           </ul>
         )}
       </section>
+      <TimetableCard studentId={studentId} />
       <ResultsCard studentId={studentId} />
       <FeesCard studentId={studentId} />
     </>

@@ -354,6 +354,32 @@ class AcademicApiIntegrationTest {
         return new String[]{nthId(created, 0), nthId(created, 1), nthId(created, 2)};   // class, section A, section B
     }
 
+    private static String periodBody(int number, String name, String start, String end, boolean brk) {
+        return "{\"number\":" + number + ",\"name\":\"" + name + "\",\"startTime\":\"" + start + "\",\"endTime\":\""
+                + end + "\",\"breakPeriod\":" + brk + "}";
+    }
+
+    private String period(String admin, int number, String name, String start, String end, boolean brk) throws Exception {
+        HttpResponse<String> created = send("POST", "/api/v1/periods", admin, periodBody(number, name, start, end, brk));
+        assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+        return idOf(created.body());
+    }
+
+    private HttpResponse<String> slot(String token, String section, int day, String periodId, String subjectId,
+                                      UUID staffId, String room) throws Exception {
+        String body = "{\"subjectId\":\"" + subjectId + "\",\"staffId\":\"" + staffId + "\""
+                + (room == null ? "" : ",\"room\":\"" + room + "\"") + "}";
+        return send("PUT", "/api/v1/timetable/sections/" + section + "/slots/" + day + "/" + periodId, token, body);
+    }
+
+    private HttpResponse<String> clear(String token, String section, int day, String periodId) throws Exception {
+        return send("DELETE", "/api/v1/timetable/sections/" + section + "/slots/" + day + "/" + periodId, token, null);
+    }
+
+    private UUID newTeacher(String email) {
+        return staff.save(new StaffMember(tenantA, UUID.randomUUID(), email, "Second", "Teacher")).getId();
+    }
+
     @Test
     void rejectsRequestsWithoutToken() throws Exception {
         assertThat(send("GET", "/api/v1/academic-years", null, null).statusCode()).isEqualTo(401);
@@ -1184,5 +1210,157 @@ class AcademicApiIntegrationTest {
         assertThat(send("GET", path + "/report-card/" + inA, teacher, null).statusCode()).isEqualTo(200);
         assertThat(send("GET", path + "/report-card/" + inB, teacher, null).statusCode()).isEqualTo(404);
         assertThat(send("GET", path + "/marks", teacher, null).body()).contains("R-A").doesNotContain("R-B");
+    }
+
+    @Test
+    void periodsFollowTheRules() throws Exception {
+        String admin = admin(tenantA);
+        String p1 = period(admin, 1, "Period 1", "08:00", "08:40", false);
+        period(admin, 2, "Period 2", "08:40", "09:20", false);   // touching the previous period is fine
+
+        assertThat(send("POST", "/api/v1/periods", admin, periodBody(3, "Clash", "08:30", "09:00", false)).statusCode())
+                .as("overlaps a period").isEqualTo(400);
+        assertThat(send("POST", "/api/v1/periods", admin, periodBody(2, "Again", "10:00", "10:40", false)).statusCode())
+                .as("number already used").isEqualTo(409);
+        assertThat(send("POST", "/api/v1/periods", admin, periodBody(4, "Backwards", "11:00", "10:00", false)).statusCode()).isEqualTo(400);
+        assertThat(send("POST", "/api/v1/periods", admin, periodBody(21, "Too many", "12:00", "12:40", false)).statusCode()).isEqualTo(400);
+        assertThat(send("POST", "/api/v1/periods", teacher(tenantA), periodBody(5, "Nope", "12:00", "12:40", false)).statusCode()).isEqualTo(403);
+
+        assertThat(send("PUT", "/api/v1/periods/" + p1, admin, periodBody(1, "First lesson", "08:00", "08:40", false)).body())
+                .contains("First lesson");
+        assertThat(send("GET", "/api/v1/periods", teacher(tenantA), null).body()).contains("First lesson").contains("Period 2");
+        assertThat(send("GET", "/api/v1/periods", admin(tenantB), null).body()).isEqualTo("[]");
+        assertThat(send("DELETE", "/api/v1/periods/" + p1, admin(tenantB), null).statusCode()).isEqualTo(404);
+        assertThat(send("DELETE", "/api/v1/periods/" + p1, admin, null).statusCode()).isEqualTo(204);
+    }
+
+    @Test
+    void slotsEnforceAssignments_andNeverDoubleBook() throws Exception {
+        String admin = admin(tenantA);
+        String[] c = classWithTwoSections(admin);   // class, section A, section B
+        String english = subject(admin, "English");
+        String maths = subject(admin, "Mathematics");
+        String p1 = period(admin, 1, "Period 1", "08:00", "08:40", false);
+        String brk = period(admin, 2, "Break", "08:40", "09:00", true);
+        UUID meena = teacherStaffId();
+        UUID ravi = newTeacher("ravi@school.com");
+
+        assertThat(slot(admin, c[1], 1, p1, english, meena, "R1").statusCode()).as("not assigned to teach it yet").isEqualTo(400);
+        assign(meena, c[1], english, false, 201);
+        assign(meena, c[2], english, false, 201);
+        assign(ravi, c[2], maths, false, 201);
+        assign(ravi, c[1], english, false, 201);
+
+        assertThat(slot(admin, c[1], 1, p1, english, meena, "R1").statusCode()).isEqualTo(200);
+        String view = send("GET", "/api/v1/timetable/sections/" + c[1], admin, null).body();
+        assertThat(view).contains("English").contains("Test Teacher").contains("R1");
+
+        assertThat(slot(admin, c[2], 1, p1, english, meena, "R2").body())
+                .as("the same teacher in two sections at once").contains("already teaching Class 8");
+        assertThat(slot(admin, c[2], 1, p1, maths, ravi, "r1").body())
+                .as("a room cannot hold two lessons, ignoring case").contains("Room r1 is already used");
+        assertThat(slot(admin, c[2], 1, p1, english, meena, "R2").statusCode()).isEqualTo(409);
+
+        assertThat(slot(admin, c[2], 1, p1, maths, ravi, "R2").statusCode()).as("a free room").isEqualTo(200);
+        assertThat(slot(admin, c[2], 2, p1, english, meena, "R1").statusCode()).as("another day is fine").isEqualTo(200);
+
+        assertThat(slot(admin, c[1], 1, brk, english, meena, null).statusCode()).as("no lessons in a break").isEqualTo(400);
+        assertThat(slot(admin, c[1], 0, p1, english, meena, null).statusCode()).isEqualTo(400);
+        assertThat(slot(admin, c[1], 8, p1, english, meena, null).statusCode()).isEqualTo(400);
+        assertThat(slot(admin, c[1], 3, UUID.randomUUID().toString(), english, meena, null).statusCode()).isEqualTo(404);
+
+        assertThat(slot(admin, c[1], 3, p1, english, meena, "R3").statusCode()).isEqualTo(200);
+        assertThat(slot(admin, c[1], 3, p1, english, ravi, "R3").body()).as("replacing the teacher of a lesson").contains("Second Teacher");
+        assertThat(slot(admin, c[2], 3, p1, english, meena, "R4").statusCode()).as("the replaced teacher is free again").isEqualTo(200);
+
+        assertThat(slot(teacher(tenantA), c[1], 4, p1, english, meena, null).statusCode()).isEqualTo(403);
+        assertThat(clear(teacher(tenantA), c[1], 1, p1).statusCode()).isEqualTo(403);
+
+        assertThat(count(send("GET", "/api/v1/timetable/sections/" + c[1], admin, null).body(), "\"day\":")).isEqualTo(2);
+        assertThat(clear(admin, c[1], 1, p1).statusCode()).isEqualTo(204);
+        assertThat(clear(admin, c[1], 1, p1).statusCode()).as("clearing twice is harmless").isEqualTo(204);
+        assertThat(count(send("GET", "/api/v1/timetable/sections/" + c[1], admin, null).body(), "\"day\":")).isEqualTo(1);
+
+        send("PUT", "/api/v1/staff/" + ravi, admin, "{\"designation\":null,\"active\":false}");
+        assertThat(slot(admin, c[2], 4, p1, maths, ravi, null).statusCode()).as("inactive teachers cannot be scheduled").isEqualTo(400);
+    }
+
+    @Test
+    void whatTheTimetableUsesCannotBeRemoved() throws Exception {
+        String admin = admin(tenantA);
+        String[] c = classWithTwoSections(admin);
+        String english = subject(admin, "English");
+        String p1 = period(admin, 1, "Period 1", "08:00", "08:40", false);
+        UUID meena = teacherStaffId();
+        assign(meena, c[1], english, false, 201);
+        slot(admin, c[1], 1, p1, english, meena, null);
+        String assignmentId = idOf(send("GET", "/api/v1/staff", admin, null).body().split("assignments")[1]);
+
+        assertThat(send("DELETE", "/api/v1/periods/" + p1, admin, null).statusCode()).as("period in use").isEqualTo(409);
+        assertThat(send("PUT", "/api/v1/periods/" + p1, admin, periodBody(1, "Break", "08:00", "08:40", true)).statusCode())
+                .as("cannot become a break while in use").isEqualTo(400);
+        assertThat(send("DELETE", "/api/v1/subjects/" + english, admin, null).statusCode()).as("subject in use").isEqualTo(409);
+        assertThat(send("DELETE", "/api/v1/assignments/" + assignmentId, admin, null).statusCode())
+                .as("a scheduled teacher stays assigned").isEqualTo(409);
+
+        clear(admin, c[1], 1, p1);
+        assertThat(send("DELETE", "/api/v1/assignments/" + assignmentId, admin, null).statusCode()).isEqualTo(204);
+        assertThat(send("DELETE", "/api/v1/periods/" + p1, admin, null).statusCode()).isEqualTo(204);
+    }
+
+    @Test
+    void timetablesAreScopedByRole() throws Exception {
+        String admin = admin(tenantA);
+        String[] c = classWithTwoSections(admin);
+        String english = subject(admin, "English");
+        String maths = subject(admin, "Mathematics");
+        String p1 = period(admin, 1, "Period 1", "08:00", "08:40", false);
+        int today = LocalDate.now(clock).getDayOfWeek().getValue();
+        UUID meena = teacherStaffId();
+        UUID ravi = newTeacher("ravi@school.com");
+        assign(meena, c[1], english, false, 201);
+        assign(ravi, c[2], maths, false, 201);
+        slot(admin, c[1], today, p1, english, meena, "R1");
+        slot(admin, c[2], today, p1, maths, ravi, "R2");
+        String teacher = teacher(tenantA);
+
+        assertThat(send("GET", "/api/v1/timetable/sections/" + c[1], teacher, null).body()).contains("English");
+        assertThat(send("GET", "/api/v1/timetable/sections/" + c[2], teacher, null).statusCode()).as("not their section").isEqualTo(403);
+        assertThat(send("GET", "/api/v1/timetable/sections/" + c[2], admin, null).body()).contains("Mathematics");
+        assertThat(send("GET", "/api/v1/timetable/sections/" + c[1], admin(tenantB), null).statusCode()).isEqualTo(404);
+
+        String mine = send("GET", "/api/v1/me/timetable", teacher, null).body();
+        assertThat(mine).contains("English").contains("Class 8").doesNotContain("Mathematics");
+        String todays = send("GET", "/api/v1/me/today", teacher, null).body();
+        assertThat(todays).contains("English").contains("\"day\":" + today).contains("\"room\":\"R1\"");
+
+        String stranger = "TEACHER." + tenantA + "." + UUID.randomUUID();
+        assertThat(send("GET", "/api/v1/me/today", stranger, null).body()).contains("\"lessons\":[]");
+        assertThat(send("GET", "/api/v1/me/timetable", admin, null).body()).contains("\"lessons\":[]");
+    }
+
+    @Test
+    void parentsSeeTheirChildsTimetable() throws Exception {
+        String admin = admin(tenantA);
+        String[] c = classWithTwoSections(admin);
+        String english = subject(admin, "English");
+        String p1 = period(admin, 1, "Period 1", "08:00", "08:40", false);
+        UUID meena = teacherStaffId();
+        assign(meena, c[1], english, false, 201);
+        slot(admin, c[1], 1, p1, english, meena, "R1");
+
+        String inSection = idOf(send("POST", "/api/v1/students", admin, studentJson("TT-1", c[1], guardianWithEmail("raj@example.com"))).body());
+        String noSection = idOf(send("POST", "/api/v1/students", admin, studentJson("TT-2", null, guardianWithEmail("raj@example.com"))).body());
+        String other = idOf(send("POST", "/api/v1/students", admin, studentJson("TT-3", c[1], guardianWithEmail("someone@example.com"))).body());
+        UUID sub = UUID.randomUUID();
+        logins.save(new GuardianLogin(sub, tenantA, "raj@example.com"));
+        String parent = parent(tenantA, sub);
+
+        assertThat(send("GET", "/api/v1/parent/children/" + inSection + "/timetable", parent, null).body())
+                .contains("English").contains("Test Teacher").contains("Period 1");
+        assertThat(send("GET", "/api/v1/parent/children/" + noSection + "/timetable", parent, null).body()).contains("\"entries\":[]");
+        assertThat(send("GET", "/api/v1/parent/children/" + other + "/timetable", parent, null).statusCode()).as("not their child").isEqualTo(404);
+        assertThat(send("GET", "/api/v1/timetable/sections/" + c[1], parent, null).statusCode()).isEqualTo(403);
+        assertThat(send("GET", "/api/v1/periods", parent, null).statusCode()).isEqualTo(403);
     }
 }

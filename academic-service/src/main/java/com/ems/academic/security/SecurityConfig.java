@@ -49,6 +49,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/v1/attendance/sections/*").hasAnyRole("TENANT_ADMIN", "TEACHER")
                         // everything else that is readable belongs to school staff only
                         .requestMatchers(HttpMethod.GET, "/api/v1/**").hasAnyRole("TENANT_ADMIN", "TEACHER")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/periods").hasRole("TENANT_ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/periods/*", "/api/v1/timetable/sections/*/slots/*/*").hasRole("TENANT_ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/periods/*", "/api/v1/timetable/sections/*/slots/*/*").hasRole("TENANT_ADMIN")
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(converter)));
 

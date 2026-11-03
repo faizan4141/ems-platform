@@ -4,10 +4,9 @@ import com.ems.academic.dto.ChildSummary;
 import com.ems.academic.dto.ChildToday;
 import com.ems.academic.dto.FeeDtos.Ledger;
 import com.ems.academic.dto.OnlinePaymentDtos.*;
+import com.ems.academic.dto.TimetableDtos;
 import com.ems.academic.security.TenantClaims;
-import com.ems.academic.service.FeeLedgerService;
-import com.ems.academic.service.OnlinePaymentService;
-import com.ems.academic.service.ParentService;
+import com.ems.academic.service.*;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -15,7 +14,6 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import com.ems.academic.dto.ExamDtos.ChildExam;
 import com.ems.academic.dto.ExamDtos.ReportCard;
-import com.ems.academic.service.ReportCardService;
 
 import java.util.List;
 import java.util.UUID;
@@ -28,12 +26,14 @@ public class ParentController {
     private final FeeLedgerService feeLedger;
     private final OnlinePaymentService online;
     private final ReportCardService reports;
+    private final TimetableService timetable;
 
-    public ParentController(ParentService service, FeeLedgerService feeLedger, OnlinePaymentService online, ReportCardService reports) {
+    public ParentController(ParentService service, FeeLedgerService feeLedger, OnlinePaymentService online, ReportCardService reports, TimetableService timetable) {
         this.service = service;
         this.feeLedger = feeLedger;
         this.online = online;
         this.reports = reports;
+        this.timetable = timetable;
     }
 
     @GetMapping("/children")
@@ -73,5 +73,10 @@ public class ParentController {
     @GetMapping("/children/{studentId}/results/{examId}")
     public ReportCard result(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID studentId, @PathVariable UUID examId) {
         return reports.forParent(TenantClaims.requireTenantId(jwt), jwt.getSubject(), studentId, examId);
+    }
+
+    @GetMapping("/children/{studentId}/timetable")
+    public TimetableDtos.SectionTimetable timetable(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID studentId) {
+        return timetable.childTimetable(TenantClaims.requireTenantId(jwt), jwt.getSubject(), studentId);
     }
 }

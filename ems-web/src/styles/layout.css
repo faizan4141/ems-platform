@@ -93,3 +93,14 @@ a.nav-item:hover { background: var(--bg); color: var(--text); }
 .marks-input[aria-invalid='true'] { border-color: var(--bad); background: var(--bad-soft); }
 .report table td, .report table th { white-space: normal; }
 .row-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.week th, .week td { vertical-align: top; white-space: normal; }
+.week td { min-width: 112px; padding: 6px; }
+.week .period-head { white-space: nowrap; }
+.slot, .cell { display: block; width: 100%; min-height: 58px; padding: 6px 8px; border-radius: 8px; font: inherit; font-size: 13px; text-align: left; }
+.slot { background: var(--bg); border: 1px dashed var(--border); color: var(--muted); cursor: pointer; }
+.slot:hover { border-color: var(--primary); }
+.slot.filled, .cell { background: var(--primary-soft); border: 1px solid transparent; color: var(--primary-ink); }
+.slot small, .cell small { display: block; color: var(--muted); }
+.break-row td { background: var(--bg); color: var(--muted); text-align: center; }
+.lesson { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.lesson:last-child { border-bottom: 0; }

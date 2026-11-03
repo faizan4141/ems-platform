@@ -6,6 +6,28 @@ import { useListStudentsQuery } from '../services/studentsApi';
 import { useGetAttendanceSummaryQuery } from '../services/attendanceApi';
 import { useGetMyTeachingQuery } from '../services/staffApi';
 import { Chip, EmptyState, PageHeader } from '../components/ui';
+import { useGetMyTodayQuery } from '../services/timetableApi';
+import { hhmm } from '../app/timetable';
+
+function TodayLessons() {
+  const { data } = useGetMyTodayQuery();
+  return (
+    <section className="card">
+      <h2>Today’s lessons</h2>
+      {!data ? <div className="skeleton" style={{ width: '50%' }} /> : data.lessons.length === 0 ? (
+        <p className="muted">No lessons scheduled for you today.</p>
+      ) : data.lessons.map((l) => (
+        <div className="lesson" key={`${l.periodId}`}>
+          <span>
+            <strong>{hhmm(l.startTime)}</strong> <span className="muted">· {l.periodName}</span><br />
+            {l.subjectName} <span className="muted">· {l.className} · {l.sectionName}{l.room ? ` · Room ${l.room}` : ''}</span>
+          </span>
+          <Link className="btn btn-secondary" to={`/attendance?section=${l.sectionId}`}>Take attendance</Link>
+        </div>
+      ))}
+    </section>
+  );
+}
 
 function TeacherClasses() {
   const { data: teaching } = useGetMyTeachingQuery();
@@ -87,6 +109,8 @@ export default function DashboardPage() {
           </div>
         ))}
       </div>
+
+      {!canManage && <TodayLessons />}
 
       <div className="two-col">
         {canManage ? (

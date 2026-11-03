@@ -10,7 +10,7 @@ describe('navFor', () => {
     expect(labels(['PLATFORM_ADMIN'])).toEqual(['Schools']);
   });
   it('shows teachers their working screens, but not people, staff or fees', () => {
-    expect(labels(['TEACHER'])).toEqual(['Dashboard', 'Students', 'Attendance', 'Exams', 'Notices', 'Network hub']);
+    expect(labels(['TEACHER'])).toEqual(['Dashboard', 'Students', 'Attendance', 'Timetable', 'Exams', 'Notices', 'Network hub']);
   });
   it('shows school admins people, staff and fees as well', () => {
     expect(labels(['TENANT_ADMIN'])).toEqual(expect.arrayContaining(['People', 'Staff', 'Fees', 'School setup']));
