@@ -3,6 +3,8 @@ package com.ems.academic.web;
 import com.ems.academic.dto.ChildSummary;
 import com.ems.academic.dto.ChildToday;
 import com.ems.academic.dto.FeeDtos.Ledger;
+import com.ems.academic.dto.HomeworkDtos;
+import com.ems.academic.service.HomeworkService;
 import com.ems.academic.dto.OnlinePaymentDtos.*;
 import com.ems.academic.dto.TimetableDtos;
 import com.ems.academic.security.TenantClaims;
@@ -27,13 +29,15 @@ public class ParentController {
     private final OnlinePaymentService online;
     private final ReportCardService reports;
     private final TimetableService timetable;
+    private final HomeworkService homework;
 
-    public ParentController(ParentService service, FeeLedgerService feeLedger, OnlinePaymentService online, ReportCardService reports, TimetableService timetable) {
+    public ParentController(ParentService service, FeeLedgerService feeLedger, OnlinePaymentService online, ReportCardService reports, TimetableService timetable, HomeworkService homework) {
         this.service = service;
         this.feeLedger = feeLedger;
         this.online = online;
         this.reports = reports;
         this.timetable = timetable;
+        this.homework = homework;
     }
 
     @GetMapping("/children")
@@ -78,5 +82,10 @@ public class ParentController {
     @GetMapping("/children/{studentId}/timetable")
     public TimetableDtos.SectionTimetable timetable(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID studentId) {
         return timetable.childTimetable(TenantClaims.requireTenantId(jwt), jwt.getSubject(), studentId);
+    }
+
+    @GetMapping("/children/{studentId}/homework")
+    public HomeworkDtos.ChildHomework homework(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID studentId) {
+        return homework.forChild(TenantClaims.requireTenantId(jwt), jwt.getSubject(), studentId);
     }
 }

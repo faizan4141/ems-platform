@@ -1,10 +1,10 @@
 package com.ems.academic;
 
-import com.ems.academic.domain.TenantSnapshot;
+import com.ems.academic.domain.*;
+import com.ems.academic.repository.HomeworkRepository;
 import com.ems.academic.repository.StaffMemberRepository;
 import com.ems.academic.repository.TenantSnapshotRepository;
 import com.ems.academic.service.StaffLoginService;
-import com.ems.academic.domain.StaffMember;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,7 +20,6 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import com.ems.academic.event.AttendanceRecorded;
 import org.springframework.context.event.EventListener;
-import com.ems.academic.domain.GuardianLogin;
 import com.ems.academic.repository.GuardianLoginRepository;
 import com.ems.academic.event.FeeReminderEvent;
 import com.ems.academic.payment.WebhookEvent;
@@ -96,6 +95,7 @@ class AcademicApiIntegrationTest {
 
     private static final HttpClient CLIENT = HttpClient.newHttpClient();
     private static final Pattern ID = Pattern.compile("\"id\":\"([0-9a-f-]{36})\"");
+    private final UUID otherTeacherSub = UUID.randomUUID();
 
     @Value("${local.server.port}") int port;
     @Autowired TenantSnapshotRepository snapshots;
@@ -104,6 +104,7 @@ class AcademicApiIntegrationTest {
     @Autowired GuardianLoginRepository logins;
     @Autowired StaffMemberRepository staff;
     @Autowired StaffLoginService staffLogins;
+    @Autowired HomeworkRepository homework;
 
     private final UUID tenantA = UUID.randomUUID();
     private final UUID tenantB = UUID.randomUUID();
@@ -378,6 +379,32 @@ class AcademicApiIntegrationTest {
 
     private UUID newTeacher(String email) {
         return staff.save(new StaffMember(tenantA, UUID.randomUUID(), email, "Second", "Teacher")).getId();
+    }
+
+    private String otherTeacher() { return "TEACHER." + tenantA + "." + otherTeacherSub; }
+
+    private UUID otherTeacherStaff() {
+        return staff.findByKeycloakId(otherTeacherSub).orElseGet(() -> staff.save(new StaffMember(tenantA, otherTeacherSub,
+                "other-" + otherTeacherSub.toString().substring(0, 8) + "@example.com", "Other", "Teacher"))).getId();
+    }
+
+    private static String hwBody(String sectionId, String subjectId, String kind, String title, String due, String... links) {
+        StringBuilder sb = new StringBuilder("{\"sectionId\":\"").append(sectionId).append("\",\"subjectId\":\"").append(subjectId)
+                .append("\",\"kind\":\"").append(kind).append("\",\"title\":\"").append(title).append("\",\"description\":\"Details\"");
+        if (due != null) sb.append(",\"dueDate\":\"").append(due).append('"');
+        if (links.length > 0) sb.append(",\"links\":[\"").append(String.join("\",\"", links)).append("\"]");
+        return sb.append('}').toString();
+    }
+
+    private HttpResponse<String> post(String token, String body) throws Exception {
+        return send("POST", "/api/v1/homework", token, body);
+    }
+
+    /** The JSON object of the post with this title, so each assertion looks at one post only. */
+    private static String hwItem(String list, String title) {
+        int at = list.indexOf("\"title\":\"" + title + "\"");
+        assertThat(at).as(title + " in " + list).isGreaterThanOrEqualTo(0);
+        return list.substring(list.lastIndexOf('{', at), list.indexOf('}', at) + 1);
     }
 
     @Test
@@ -1362,5 +1389,157 @@ class AcademicApiIntegrationTest {
         assertThat(send("GET", "/api/v1/parent/children/" + other + "/timetable", parent, null).statusCode()).as("not their child").isEqualTo(404);
         assertThat(send("GET", "/api/v1/timetable/sections/" + c[1], parent, null).statusCode()).isEqualTo(403);
         assertThat(send("GET", "/api/v1/periods", parent, null).statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void teachersPostOnlyWhereTheyTeach_andInputIsValidated() throws Exception {
+        String admin = admin(tenantA);
+        String[] c = classWithTwoSections(admin);
+        String english = subject(admin, "English");
+        String maths = subject(admin, "Mathematics");
+        teachesSubject(c[1], english);
+        String teacher = teacher(tenantA);
+        LocalDate today = LocalDate.now(clock);
+        String due = today.plusDays(3).toString();
+
+        HttpResponse<String> ok = post(teacher, hwBody(c[1], english, "HOMEWORK", "Chapter 3", due,
+                "https://example.com/a", "", "https://example.com/a"));
+        assertThat(ok.statusCode()).isEqualTo(201);
+        assertThat(ok.body()).contains("\"links\":[\"https://example.com/a\"]").contains("\"canEdit\":true");
+        assertThat(post(teacher, hwBody(c[1], english, "NOTE", "Formulas", null)).statusCode()).isEqualTo(201);
+
+        assertThat(post(teacher, hwBody(c[1], maths, "HOMEWORK", "Wrong subject", due)).statusCode()).isEqualTo(403);
+        assertThat(post(teacher, hwBody(c[2], english, "HOMEWORK", "Wrong section", due)).statusCode()).isEqualTo(403);
+        assertThat(post(teacher, hwBody(UUID.randomUUID().toString(), english, "HOMEWORK", "Unknown", due)).statusCode()).isEqualTo(404);
+        assertThat(post(teacher, hwBody(c[1], UUID.randomUUID().toString(), "HOMEWORK", "Unknown", due)).statusCode()).isEqualTo(404);
+
+        assertThat(post(teacher, hwBody(c[1], english, "HOMEWORK", "Late", today.minusDays(1).toString())).statusCode()).isEqualTo(400);
+        assertThat(post(teacher, hwBody(c[1], english, "HOMEWORK", "No date", null)).statusCode()).isEqualTo(400);
+        assertThat(post(teacher, hwBody(c[1], english, "HOMEWORK", "Far away", today.plusYears(2).toString())).statusCode()).isEqualTo(400);
+        assertThat(post(teacher, hwBody(c[1], english, "NOTE", "Note with a date", due)).statusCode()).isEqualTo(400);
+        assertThat(post(teacher, hwBody(c[1], english, "HOMEWORK", "Bad link", due, "javascript:alert(1)")).statusCode()).isEqualTo(400);
+        assertThat(post(teacher, hwBody(c[1], english, "HOMEWORK", "Many links", due, "https://e.com/1", "https://e.com/2",
+                "https://e.com/3", "https://e.com/4", "https://e.com/5", "https://e.com/6")).statusCode()).isEqualTo(400);
+        assertThat(post(teacher, hwBody(c[1], english, "HOMEWORK", "   ", due)).statusCode()).isEqualTo(400);
+
+        assertThat(post(parent(tenantA, UUID.randomUUID()), hwBody(c[1], english, "HOMEWORK", "Nope", due)).statusCode()).isEqualTo(403);
+        assertThat(post(admin, hwBody(c[2], maths, "HOMEWORK", "Admin anywhere", due)).statusCode()).isEqualTo(201);
+        classTeacherOf(c[2]);
+        assertThat(post(teacher, hwBody(c[2], maths, "HOMEWORK", "Class teacher, any subject", due)).statusCode()).isEqualTo(201);
+    }
+
+    @Test
+    void listsAreScopedByRole_andShowWhoMayEdit() throws Exception {
+        String admin = admin(tenantA);
+        String[] c = classWithTwoSections(admin);
+        String english = subject(admin, "English");
+        teachesSubject(c[1], english);
+        assign(otherTeacherStaff(), c[1], english, false, 201);
+        assign(otherTeacherStaff(), c[2], english, false, 201);
+        String due = LocalDate.now(clock).plusDays(2).toString();
+        assertThat(post(teacher(tenantA), hwBody(c[1], english, "HOMEWORK", "Mine", due)).statusCode()).isEqualTo(201);
+        assertThat(post(otherTeacher(), hwBody(c[1], english, "HOMEWORK", "Theirs", due)).statusCode()).isEqualTo(201);
+        assertThat(post(otherTeacher(), hwBody(c[2], english, "NOTE", "In B", null)).statusCode()).isEqualTo(201);
+
+        String mine = send("GET", "/api/v1/homework", teacher(tenantA), null).body();
+        assertThat(mine).contains("Mine").contains("Theirs").doesNotContain("In B");
+        assertThat(hwItem(mine, "Mine")).contains("\"canEdit\":true");
+        assertThat(hwItem(mine, "Theirs")).contains("\"canEdit\":false");
+
+        String all = send("GET", "/api/v1/homework", admin, null).body();
+        assertThat(all).contains("Mine").contains("Theirs").contains("In B");
+        assertThat(hwItem(all, "Theirs")).contains("\"canEdit\":true");
+        assertThat(send("GET", "/api/v1/homework?sectionId=" + c[2], admin, null).body()).contains("In B").doesNotContain("Mine");
+        assertThat(send("GET", "/api/v1/homework?kind=NOTE", admin, null).body()).contains("In B").doesNotContain("Mine");
+
+        assertThat(send("GET", "/api/v1/homework?sectionId=" + c[2], teacher(tenantA), null).statusCode()).isEqualTo(403);
+        String stranger = "TEACHER." + tenantA + "." + UUID.randomUUID();
+        assertThat(send("GET", "/api/v1/homework", stranger, null).body()).isEqualTo("[]");
+        assertThat(send("GET", "/api/v1/homework", admin(tenantB), null).body()).isEqualTo("[]");
+        assertThat(send("GET", "/api/v1/homework?sectionId=" + c[1], admin(tenantB), null).statusCode()).isEqualTo(404);
+        assertThat(send("GET", "/api/v1/homework", parent(tenantA, UUID.randomUUID()), null).statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void editingAndRemoving_followOwnership() throws Exception {
+        String admin = admin(tenantA);
+        String[] c = classWithTwoSections(admin);
+        String english = subject(admin, "English");
+        teachesSubject(c[1], english);
+        assign(otherTeacherStaff(), c[1], english, false, 201);
+        String teacher = teacher(tenantA);
+        LocalDate today = LocalDate.now(clock);
+        String due = today.plusDays(3).toString();
+
+        String id = idOf(post(teacher, hwBody(c[1], english, "HOMEWORK", "Original", due)).body());
+        String path = "/api/v1/homework/" + id;
+        String update = "{\"title\":\"Updated\",\"description\":\"New details\",\"dueDate\":\"" + due + "\",\"links\":[\"https://example.com/x\"]}";
+
+        assertThat(send("PUT", path, teacher, update).body()).contains("Updated").contains("example.com/x");
+        assertThat(send("PUT", path, otherTeacher(), update).statusCode()).as("not their post").isEqualTo(403);
+        assertThat(send("PUT", path, admin(tenantB), update).statusCode()).isEqualTo(404);
+        assertThat(send("PUT", path, teacher, update.replace(due, today.minusDays(2).toString())).statusCode()).as("a new past date").isEqualTo(400);
+        assertThat(send("PUT", path, admin, update.replace("Updated", "By admin")).body()).contains("By admin");
+
+        // last week's homework can still be corrected, as long as its date stays the same
+        Homework old = homework.save(new Homework(tenantA, UUID.fromString(c[1]), UUID.fromString(english), HomeworkKind.HOMEWORK,
+                "Old work", "Details", today.minusDays(5), null, "legacy-author", "Legacy", Instant.now()));
+        String oldBody = "{\"title\":\"Old work, clarified\",\"description\":\"More\",\"dueDate\":\"" + today.minusDays(5) + "\",\"links\":[]}";
+        assertThat(send("PUT", "/api/v1/homework/" + old.getId(), admin, oldBody).statusCode()).isEqualTo(200);
+        assertThat(send("PUT", "/api/v1/homework/" + old.getId(), admin,
+                oldBody.replace(today.minusDays(5).toString(), today.minusDays(4).toString())).statusCode()).isEqualTo(400);
+
+        assertThat(send("DELETE", path, otherTeacher(), null).statusCode()).isEqualTo(403);
+        assertThat(send("DELETE", path, teacher, null).statusCode()).isEqualTo(204);
+        assertThat(send("GET", "/api/v1/homework", admin, null).body()).doesNotContain("By admin");
+        assertThat(send("PUT", path, teacher, update).statusCode()).as("removed posts are gone").isEqualTo(404);
+        assertThat(send("DELETE", path, teacher, null).statusCode()).isEqualTo(404);
+
+        String second = idOf(post(teacher, hwBody(c[1], english, "HOMEWORK", "Second", due)).body());
+        send("PUT", "/api/v1/staff/" + teacherStaffId(), admin, "{\"designation\":null,\"active\":false}");
+        assertThat(send("PUT", "/api/v1/homework/" + second, teacher, update).statusCode()).as("a deactivated teacher loses access").isEqualTo(404);
+        assertThat(send("PUT", "/api/v1/homework/" + second, admin, update).statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void parentsSeeTheirChildsHomeworkOnly() throws Exception {
+        String admin = admin(tenantA);
+        String[] c = classWithTwoSections(admin);
+        String english = subject(admin, "English");
+        String due = LocalDate.now(clock).plusDays(2).toString();
+        post(admin, hwBody(c[1], english, "HOMEWORK", "For A", due, "https://example.com/video"));
+        post(admin, hwBody(c[2], english, "HOMEWORK", "For B", due));
+        post(admin, hwBody(c[1], english, "NOTE", "Note A", null));
+        String gone = idOf(post(admin, hwBody(c[1], english, "HOMEWORK", "Gone", due)).body());
+        send("DELETE", "/api/v1/homework/" + gone, admin, null);
+
+        String inA = idOf(send("POST", "/api/v1/students", admin, studentJson("H-1", c[1], guardianWithEmail("raj@example.com"))).body());
+        String inB = idOf(send("POST", "/api/v1/students", admin, studentJson("H-2", c[2], guardianWithEmail("raj@example.com"))).body());
+        String noSection = idOf(send("POST", "/api/v1/students", admin, studentJson("H-3", null, guardianWithEmail("raj@example.com"))).body());
+        String stranger = idOf(send("POST", "/api/v1/students", admin, studentJson("H-4", c[1], guardianWithEmail("someone@example.com"))).body());
+        UUID sub = UUID.randomUUID();
+        logins.save(new GuardianLogin(sub, tenantA, "raj@example.com"));
+        String parent = parent(tenantA, sub);
+
+        String forA = send("GET", "/api/v1/parent/children/" + inA + "/homework", parent, null).body();
+        assertThat(forA).contains("For A").contains("Note A").contains("example.com/video")
+                .contains("\"today\":\"" + LocalDate.now(clock) + "\"").doesNotContain("For B").doesNotContain("Gone");
+        String forB = send("GET", "/api/v1/parent/children/" + inB + "/homework", parent, null).body();
+        assertThat(forB).contains("For B").doesNotContain("For A");
+        assertThat(send("GET", "/api/v1/parent/children/" + noSection + "/homework", parent, null).body()).contains("\"items\":[]");
+        assertThat(send("GET", "/api/v1/parent/children/" + stranger + "/homework", parent, null).statusCode()).as("not their child").isEqualTo(404);
+        assertThat(send("GET", "/api/v1/parent/children/" + inA + "/homework", teacher(tenantA), null).statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void aSubjectWithHomeworkCannotBeDeleted_evenAfterItIsRemoved() throws Exception {
+        String admin = admin(tenantA);
+        String[] c = classWithTwoSections(admin);
+        String english = subject(admin, "English");
+        String id = idOf(post(admin, hwBody(c[1], english, "NOTE", "Formulas", null)).body());
+
+        assertThat(send("DELETE", "/api/v1/subjects/" + english, admin, null).statusCode()).isEqualTo(409);
+        send("DELETE", "/api/v1/homework/" + id, admin, null);
+        assertThat(send("DELETE", "/api/v1/subjects/" + english, admin, null).statusCode()).as("history is kept").isEqualTo(409);
     }
 }

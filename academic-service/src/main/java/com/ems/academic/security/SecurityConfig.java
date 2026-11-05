@@ -52,6 +52,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/periods").hasRole("TENANT_ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/v1/periods/*", "/api/v1/timetable/sections/*/slots/*/*").hasRole("TENANT_ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/periods/*", "/api/v1/timetable/sections/*/slots/*/*").hasRole("TENANT_ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/homework").hasAnyRole("TENANT_ADMIN", "TEACHER")
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/homework/*").hasAnyRole("TENANT_ADMIN", "TEACHER")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/homework/*").hasAnyRole("TENANT_ADMIN", "TEACHER")
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt.jwtAuthenticationConverter(converter)));
 

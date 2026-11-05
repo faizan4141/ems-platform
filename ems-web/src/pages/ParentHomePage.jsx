@@ -23,6 +23,9 @@ import ReportCardDialog from '../components/ReportCardDialog';
 import { useGetChildTimetableQuery } from '../services/timetableApi';
 import { indexEntries, slotKey } from '../app/timetable';
 import WeekGrid from '../components/WeekGrid';
+import { useGetChildHomeworkQuery } from '../services/homeworkApi';
+import { KIND, dueStatus, orderForParents } from '../app/homework';
+import LinkList from '../components/LinkList';
 
 function PaymentBanner() {
   const dispatch = useDispatch();
@@ -152,6 +155,39 @@ function TimetableCard({ studentId }) {
   );
 }
 
+function HomeworkCard({ studentId }) {
+  const { data } = useGetChildHomeworkQuery(studentId);
+  const [showAll, setShowAll] = useState(false);
+  if (!data || data.items.length === 0) return null;   // nothing has been posted yet
+
+  const ordered = orderForParents(data.items, data.today);
+  const shown = showAll ? ordered : ordered.slice(0, 6);
+  return (
+    <section className="card">
+      <h2>Homework and notes</h2>
+      {shown.map((h) => {
+        const status = h.kind === 'HOMEWORK' ? dueStatus(h.dueDate, data.today) : null;
+        return (
+          <article className="hw-item" key={h.id}>
+            <div className="notice-meta">
+              <Chip tone={KIND[h.kind].tone}>{KIND[h.kind].label}</Chip>
+              <strong>{h.subjectName}</strong>
+              {status && <Chip tone={status.tone}>{status.label}</Chip>}
+            </div>
+            <h3>{h.title}</h3>
+            <p>{h.description}</p>
+            <LinkList links={h.links} />
+            <div className="muted notice-meta">{h.authorName}</div>
+          </article>
+        );
+      })}
+      {ordered.length > 6 && (
+        <button className="btn btn-secondary" onClick={() => setShowAll((v) => !v)}>{showAll ? 'Show less' : `Show all ${ordered.length}`}</button>
+      )}
+    </section>
+  );
+}
+
 function ChildToday({ studentId }) {
   const { data, error } = useGetChildTodayQuery(studentId);
   if (error) return <ErrorNotice error={error} />;
@@ -194,6 +230,7 @@ function ChildToday({ studentId }) {
           </ul>
         )}
       </section>
+      <HomeworkCard studentId={studentId} />
       <TimetableCard studentId={studentId} />
       <ResultsCard studentId={studentId} />
       <FeesCard studentId={studentId} />

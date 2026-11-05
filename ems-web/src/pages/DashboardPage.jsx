@@ -22,7 +22,10 @@ function TodayLessons() {
             <strong>{hhmm(l.startTime)}</strong> <span className="muted">· {l.periodName}</span><br />
             {l.subjectName} <span className="muted">· {l.className} · {l.sectionName}{l.room ? ` · Room ${l.room}` : ''}</span>
           </span>
-          <Link className="btn btn-secondary" to={`/attendance?section=${l.sectionId}`}>Take attendance</Link>
+          <span className="row-actions">
+            <Link className="btn btn-secondary" to={`/homework?section=${l.sectionId}&subject=${l.subjectId}`}>Set homework</Link>
+            <Link className="btn btn-secondary" to={`/attendance?section=${l.sectionId}`}>Take attendance</Link>
+          </span>
         </div>
       ))}
     </section>

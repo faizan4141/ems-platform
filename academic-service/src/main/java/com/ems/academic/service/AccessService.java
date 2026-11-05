@@ -49,6 +49,9 @@ public class AccessService {
             if (sectionId == null || subjectId == null) return false;
             return classTeacherSections.contains(sectionId) || subjectPairs.contains(pair(sectionId, subjectId));
         }
+
+        /** Posting homework follows the same rule as entering marks: a class teacher for their section, else only their subject. */
+        public boolean canTeach(UUID sectionId, UUID subjectId) { return canEditMarks(sectionId, subjectId); }
     }
 
     private final StaffMemberRepository staff;

@@ -5,10 +5,7 @@ import com.ems.academic.dto.ExamDtos.SubjectRequest;
 import com.ems.academic.dto.ExamDtos.SubjectView;
 import com.ems.academic.exception.DuplicateResourceException;
 import com.ems.academic.exception.ResourceNotFoundException;
-import com.ems.academic.repository.ExamSubjectRepository;
-import com.ems.academic.repository.SubjectRepository;
-import com.ems.academic.repository.TeachingAssignmentRepository;
-import com.ems.academic.repository.TimetableEntryRepository;
+import com.ems.academic.repository.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,13 +20,15 @@ public class SubjectService {
     private final TenantGuard guard;
     private final TeachingAssignmentRepository assignments;
     private final TimetableEntryRepository timetable;
+    private final HomeworkRepository homework;
 
-    public SubjectService(SubjectRepository subjects, ExamSubjectRepository examSubjects, TenantGuard guard, TeachingAssignmentRepository assignments, TimetableEntryRepository timetable) {
+    public SubjectService(SubjectRepository subjects, ExamSubjectRepository examSubjects, TenantGuard guard, TeachingAssignmentRepository assignments, TimetableEntryRepository timetable, HomeworkRepository homework) {
         this.subjects = subjects;
         this.examSubjects = examSubjects;
         this.guard = guard;
         this.assignments = assignments;
         this.timetable = timetable;
+        this.homework = homework;
     }
 
     @Transactional(readOnly = true)
@@ -56,8 +55,9 @@ public class SubjectService {
         guard.requireActive(tenantId);
         Subject subject = subjects.findByIdAndTenantId(id, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Subject not found"));
-        if (examSubjects.existsBySubjectId(id) || assignments.existsBySubjectId(id) || timetable.existsBySubjectId(id)) {
-            throw new DuplicateResourceException("This subject is used by an exam, a teacher or the timetable and cannot be deleted");
+        if (examSubjects.existsBySubjectId(id) || assignments.existsBySubjectId(id)
+                || timetable.existsBySubjectId(id) || homework.existsBySubjectId(id)) {
+            throw new DuplicateResourceException("This subject is used by an exam, a teacher, the timetable or homework and cannot be deleted");
         }
         subjects.delete(subject);
     }
